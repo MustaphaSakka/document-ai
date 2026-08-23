@@ -5,7 +5,7 @@ Complete reference of all available npm scripts in this project.
 ## Development Commands
 
 ### `npm run dev`
-Runs TypeScript directly in development mode using `ts-node`. This is the fastest way to develop as it skips the compilation step.
+Runs TypeScript directly in development mode using `tsx`. This is the fastest way to develop as it skips the compilation step.
 
 ```bash
 npm run dev
@@ -14,6 +14,19 @@ npm run dev
 **Use case**: During active development when you want to see changes immediately without waiting for compilation.
 
 **Output**: Executes `src/index.ts` and any console output
+
+### `npm run dev:watch`
+Runs TypeScript in development mode with file watching using `tsx`.
+
+```bash
+npm run dev:watch
+```
+
+**What it does**: Automatically restarts the application when TypeScript files change
+
+**Use case**: During active development when you want automatic re-execution on file changes
+
+**Output**: Executes `src/index.ts` and restarts on changes
 
 ### `npm run build`
 Compiles TypeScript source files to JavaScript output.

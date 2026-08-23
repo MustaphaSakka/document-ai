@@ -133,7 +133,7 @@ tests/
 - Recreated on different machines via `npm install`
 
 **Key dependencies** (devDependencies):
-- **TypeScript**: typescript, @types/node, ts-node
+- **TypeScript**: typescript, @types/node, tsx
 - **Testing**: vitest, @vitest/coverage-v8
 - **Code Quality**: eslint, typescript-eslint, prettier
 

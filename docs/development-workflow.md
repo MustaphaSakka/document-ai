@@ -420,8 +420,11 @@ npm install --save-dev @types/package  # If types are needed
 
 #### Fast Iteration
 ```bash
-# Use ts-node for fastest development
+# Use tsx for fastest development
 npm run dev
+
+# For automatic re-execution on changes
+npm run dev:watch
 
 # Avoid rebuilding on every change
 # Use watch mode for tests
