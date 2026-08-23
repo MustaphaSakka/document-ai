@@ -9,6 +9,10 @@ If you're new to the project, start with:
 2. [Project Structure](project-structure.md) - Understand the codebase organization
 3. [Development Workflow](development-workflow.md) - Follow the development process
 
+### Technical Documentation
+For in-depth technical explanations, see the [technical/](technical/) directory:
+- [HTTP Server Concepts](technical/http-server-concepts.md) - Complete guide to Node.js HTTP server fundamentals
+
 ## Documentation Contents
 
 ### 📚 [Commands Reference](commands.md)
