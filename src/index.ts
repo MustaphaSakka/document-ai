@@ -5,10 +5,8 @@
  * processing application using AWS services (S3, Textract, Bedrock).
  */
 
-function main(): void {
-  console.log('🚀 Document AI Application');
-  console.log('TypeScript + Node.js setup complete!');
-  console.log('Ready to start building...');
-}
+import { startServer } from './server.js';
 
-main();
+const PORT = 3000;
+
+startServer(PORT);
