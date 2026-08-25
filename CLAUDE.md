@@ -40,6 +40,15 @@ Learning principles:
 - Prefer understanding the underlying Node.js mechanism before introducing a framework that abstracts it.
 - When there are multiple reasonable approaches, explain the trade-offs before choosing one.
 
+Learning and communication style:
+
+- Keep explanations concise and focused on essential concepts.
+- Before implementing a feature, explain only the 3 most important concepts I need to understand.
+- Prioritize implementation over theoretical explanations.
+- Avoid lengthy tutorials unless explicitly requested.
+- Prefer learning through implementation and iteration.
+- Keep explanations under 300 words unless more detail is necessary or explicitly requested.
+
 Development workflow:
 
 Before implementing a significant feature:
