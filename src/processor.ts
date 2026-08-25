@@ -1,11 +1,10 @@
 /**
  * Document Processor
- * Handles asynchronous document processing
+ * Handles asynchronous document processing with AWS Textract
  */
 
-import { GetObjectCommand } from '@aws-sdk/client-s3';
-import { s3Client } from './s3-client.js';
 import { documentService } from './document-service.js';
+import { startTextDetection, pollTextDetection, extractTextFromBlocks } from './textract-processor.js';
 import type { ProcessingResult } from './document-service.js';
 
 export interface ProcessingOptions {
@@ -14,7 +13,7 @@ export interface ProcessingOptions {
 }
 
 /**
- * Process a document asynchronously
+ * Process a document asynchronously with Textract
  */
 export async function processDocument(
   documentId: string,
@@ -45,8 +44,8 @@ export async function processDocument(
             return;
           }
 
-          // Perform actual processing
-          const result = await analyzeDocument(document.s3Bucket!, document.s3Key!);
+          // Perform actual processing with Textract
+          const result = await analyzeDocumentWithTextract(document.s3Bucket!, document.s3Key!);
           documentService.updateDocumentResult(documentId, result);
           resolve();
         } catch (error) {
@@ -60,36 +59,32 @@ export async function processDocument(
 }
 
 /**
- * Analyze document and extract metrics
+ * Analyze document using AWS Textract
  */
-async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
+async function analyzeDocumentWithTextract(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
   const startTime = Date.now();
 
   try {
-    // Get object from S3
-    const s3Response = await s3Client.send(
-      new GetObjectCommand({
-        Bucket: s3Bucket,
-        Key: s3Key,
-      })
-    );
+    // Start async text detection job
+    console.log(`Starting Textract job for ${s3Bucket}/${s3Key}`);
+    const jobId = await startTextDetection(s3Bucket, s3Key);
+    console.log(`Textract job started: ${jobId}`);
 
-    // Convert stream to buffer/string
-    const chunks: Buffer[] = [];
-    const stream = s3Response.Body as NodeJS.ReadableStream;
+    // Poll for results
+    const response = await pollTextDetection(jobId);
+    console.log(`Textract job completed: ${jobId}, Status: ${response.JobStatus}`);
 
-    for await (const chunk of stream) {
-      if (Buffer.isBuffer(chunk)) {
-        chunks.push(chunk);
-      } else {
-        chunks.push(Buffer.from(chunk));
-      }
+    // Check if job failed
+    if (response.JobStatus === 'FAILED' || response.JobStatus === 'PARTIAL_SUCCESS') {
+      const message = response.StatusMessage || 'Textract processing failed';
+      throw new Error(`Textract job failed: ${message}`);
     }
 
-    const content = Buffer.concat(chunks).toString('utf-8');
+    // Extract text from Textract blocks
+    const extractedText = extractTextFromBlocks(response.Blocks);
 
-    // Simple text analysis
-    const words = content.split(/\s+/).filter(word => word.length > 0);
+    // Calculate metrics from extracted text
+    const words = extractedText.split(/\s+/).filter(word => word.length > 0);
     const wordCount = words.length;
 
     // Estimate pages (assuming ~250 words per page)
@@ -104,7 +99,7 @@ async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<Process
       processedAt: new Date(),
     };
   } catch (error) {
-    throw new Error(`Failed to read from S3: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
+    throw new Error(`Textract processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
   }
 }
 
