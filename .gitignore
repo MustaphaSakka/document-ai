@@ -33,3 +33,4 @@ coverage/
 *.tsbuildinfo
 
 .claude/settings.local.json
+temp/
