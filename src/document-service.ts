@@ -10,10 +10,16 @@ export interface Document {
   name: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   createdAt: Date;
+  filepath?: string;
+  size?: number;
+  mimetype?: string;
 }
 
 export interface CreateDocumentRequest {
   name: string;
+  filepath?: string;
+  size?: number;
+  mimetype?: string;
 }
 
 export interface ValidationError {
@@ -82,6 +88,9 @@ export class DocumentService {
       name: request.name.trim(),
       status: 'pending',
       createdAt: new Date(),
+      filepath: request.filepath,
+      size: request.size,
+      mimetype: request.mimetype,
     };
 
     this.documents.set(id, document);

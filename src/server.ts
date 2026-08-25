@@ -4,11 +4,9 @@
 
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import {
-  documentService,
-  validateCreateRequest,
-  type CreateDocumentRequest,
-} from './document-service.js';
+import Busboy from 'busboy';
+import { documentService } from './document-service.js';
+import { streamFileToFile } from './file-handler.js';
 
 interface HealthResponse {
   status: string;
@@ -23,95 +21,203 @@ interface DocumentResponse {
   id: string;
   name: string;
   status: string;
+  size?: number;
+  mimetype?: string;
+}
+
+interface BusboyFileObject {
+  filename: string;
+  encoding: string;
+  mimeType: string;
 }
 
 /**
- * Read request body as JSON
+ * Handle POST /documents endpoint with file upload
  */
-function readRequestBody(request: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let body = '';
-
-    request.on('data', (chunk: Buffer) => {
-      body += chunk.toString();
-
-      // Prevent memory issues with very large requests
-      if (body.length > 1e6) {
-        request.destroy();
-        reject(new Error('Request body too large'));
-      }
-    });
-
-    request.on('end', () => {
-      resolve(body);
-    });
-
-    request.on('error', (error) => {
-      reject(error);
-    });
-  });
-}
-
-/**
- * Handle POST /documents endpoint
- */
-async function handleCreateDocument(request: IncomingMessage, response: ServerResponse): Promise<void> {
+function handleCreateDocument(request: IncomingMessage, response: ServerResponse): void {
   try {
     // Validate content type
     const contentType = request.headers['content-type'];
-    if (!contentType || !contentType.includes('application/json')) {
+    if (!contentType || !contentType.includes('multipart/form-data')) {
       response.statusCode = 415;
       response.setHeader('Content-Type', 'application/json');
       const errorData: ErrorResponse = {
         error: 'Unsupported Media Type',
-        message: 'Content-Type must be application/json',
+        message: 'Content-Type must be multipart/form-data',
       };
       response.end(JSON.stringify(errorData));
       return;
     }
 
-    // Read request body
-    const body = await readRequestBody(request);
+    // Parse multipart form data using busboy
+    const busboyInstance = Busboy({
+      headers: request.headers,
+      limits: {
+        fileSize: 10 * 1024 * 1024, // 10 MB limit
+      },
+    });
 
-    // Parse JSON
-    let data: unknown;
-    try {
-      data = JSON.parse(body);
-    } catch {
-      response.statusCode = 400;
+    let fileResult:
+      | { filename: string; filepath: string; size: number; mimetype: string }
+      | null = null;
+    let uploadError: Error | null = null;
+    let fileUploadComplete = false;
+    let fileEventReceived = false;
+
+    // Handle file upload
+    busboyInstance.on('file', (_fieldname: string, file: NodeJS.ReadableStream, fileObject: BusboyFileObject) => {
+      fileEventReceived = true;
+      const filename = fileObject.filename;
+      const mimetype = fileObject.mimeType;
+
+      // Stream file and handle completion with callback
+      streamFileToFile(file, filename, mimetype)
+        .then((result) => {
+          if ('error' in result) {
+            uploadError = new Error(result.message);
+            const readableStream = file as unknown as { destroy: (error?: Error) => void };
+            readableStream.destroy();
+          } else {
+            fileResult = result;
+          }
+          fileUploadComplete = true;
+
+          // Check if we can send response
+          checkAndSendResponse();
+        })
+        .catch((error: Error) => {
+          uploadError = error;
+          fileUploadComplete = true;
+
+          // Check if we can send response
+          checkAndSendResponse();
+        });
+    });
+
+    // Track when busboy finishes parsing
+    let busboyFinished = false;
+
+    busboyInstance.on('finish', () => {
+      busboyFinished = true;
+
+      // If no file was received, mark upload as complete
+      if (!fileEventReceived) {
+        fileUploadComplete = true;
+      }
+
+      // Check if we can send response
+      checkAndSendResponse();
+    });
+
+    // Function to check if both operations are complete and send response
+    function checkAndSendResponse(): void {
+      // Only send response when both are complete
+      if (!busboyFinished || !fileUploadComplete) {
+        return;
+      }
+
+      sendResponse();
+    }
+
+    function sendResponse(): void {
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        response.statusCode = 400;
+        response.setHeader('Content-Type', 'application/json');
+        const errorData: ErrorResponse = {
+          error: 'Upload Failed',
+          message: uploadError.message,
+        };
+        response.end(JSON.stringify(errorData));
+        return;
+      }
+
+      if (!fileResult) {
+        response.statusCode = 400;
+        response.setHeader('Content-Type', 'application/json');
+        const errorData: ErrorResponse = {
+          error: 'Bad Request',
+          message: 'No file provided',
+        };
+        response.end(JSON.stringify(errorData));
+        return;
+      }
+
+      // Create document record
+      const document = documentService.createDocument({
+        name: fileResult.filename,
+        filepath: fileResult.filepath,
+        size: fileResult.size,
+        mimetype: fileResult.mimetype,
+      });
+
+      // Return 201 Created
+      response.statusCode = 201;
       response.setHeader('Content-Type', 'application/json');
-      const errorData: ErrorResponse = {
-        error: 'Bad Request',
-        message: 'Invalid JSON',
+      response.setHeader('Location', `/documents/${document.id}`);
+
+      const responseData: DocumentResponse = {
+        id: document.id,
+        name: document.name,
+        status: document.status,
+        size: document.size,
+        mimetype: document.mimetype,
       };
-      response.end(JSON.stringify(errorData));
-      return;
+      response.end(JSON.stringify(responseData));
     }
 
-    // Validate request data
-    const validationError = validateCreateRequest(data);
-    if (validationError) {
-      response.statusCode = 400;
-      response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify(validationError));
-      return;
-    }
+    // Handle busboy errors
+    busboyInstance.on('error', (error) => {
+      console.error('Busboy error:', error);
+      if (!response.headersSent) {
+        response.statusCode = 500;
+        response.setHeader('Content-Type', 'application/json');
+        const errorData: ErrorResponse = {
+          error: 'Internal Server Error',
+          message: 'Failed to process file upload',
+        };
+        response.end(JSON.stringify(errorData));
+      }
+    });
 
-    // Create document
-    const createRequest = data as CreateDocumentRequest;
-    const document = documentService.createDocument(createRequest);
+    // Add debug logging for busboy events
+    busboyInstance.on('partsLimit', () => {
+      console.log('Parts limit reached');
+    });
 
-    // Return 201 Created
-    response.statusCode = 201;
-    response.setHeader('Content-Type', 'application/json');
-    response.setHeader('Location', `/documents/${document.id}`);
+    busboyInstance.on('filesLimit', () => {
+      console.log('Files limit reached');
+    });
 
-    const responseData: DocumentResponse = {
-      id: document.id,
-      name: document.name,
-      status: document.status,
-    };
-    response.end(JSON.stringify(responseData));
+    busboyInstance.on('fieldsLimit', () => {
+      console.log('Fields limit reached');
+    });
+
+    // Pipe request to busboy and handle completion
+    request.pipe(busboyInstance);
+
+    // Handle request end
+    request.on('end', () => {
+      // Set busboy finished flag if finish event hasn't fired yet
+      if (!busboyFinished) {
+        busboyFinished = true;
+        checkAndSendResponse();
+      }
+    });
+
+    // Handle request errors
+    request.on('error', (error) => {
+      console.error('Request error:', error);
+      if (!response.headersSent) {
+        response.statusCode = 500;
+        response.setHeader('Content-Type', 'application/json');
+        const errorData: ErrorResponse = {
+          error: 'Internal Server Error',
+          message: 'Request processing failed',
+        };
+        response.end(JSON.stringify(errorData));
+      }
+    });
   } catch (error) {
     console.error('Error creating document:', error);
     response.statusCode = 500;

@@ -1,9 +1,9 @@
 /**
- * Tests for document submission functionality
+ * Tests for document service functionality
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { documentService, validateCreateRequest, type CreateDocumentRequest } from '../src/document-service';
+import { documentService } from '../src/document-service';
 import { resetIdCounter } from '../src/utils';
 
 describe('Document Service', () => {
@@ -12,63 +12,36 @@ describe('Document Service', () => {
     resetIdCounter();
   });
 
-  describe('validateCreateRequest', () => {
-    it('should accept valid request', () => {
-      const data: CreateDocumentRequest = { name: 'document.pdf' };
-      const result = validateCreateRequest(data);
-      expect(result).toBeNull();
-    });
-
-    it('should reject non-object data', () => {
-      expect(validateCreateRequest(null)).not.toBeNull();
-      expect(validateCreateRequest(undefined)).not.toBeNull();
-      expect(validateCreateRequest('string')).not.toBeNull();
-      expect(validateCreateRequest(123)).not.toBeNull();
-      expect(validateCreateRequest([])).not.toBeNull();
-    });
-
-    it('should reject request without name field', () => {
-      const result = validateCreateRequest({});
-      expect(result).not.toBeNull();
-      expect(result?.error).toBe('Validation Error');
-      expect(result?.message).toContain('name');
-    });
-
-    it('should reject request with non-string name', () => {
-      expect(validateCreateRequest({ name: 123 })).not.toBeNull();
-      expect(validateCreateRequest({ name: {} })).not.toBeNull();
-      expect(validateCreateRequest({ name: [] })).not.toBeNull();
-      expect(validateCreateRequest({ name: null })).not.toBeNull();
-    });
-
-    it('should reject request with empty name', () => {
-      const result = validateCreateRequest({ name: '   ' });
-      expect(result).not.toBeNull();
-      expect(result?.error).toBe('Validation Error');
-      expect(result?.message).toContain('empty');
-    });
-
-    it('should accept name with leading/trailing whitespace', () => {
-      const data: CreateDocumentRequest = { name: '  document.pdf  ' };
-      const result = validateCreateRequest(data);
-      expect(result).toBeNull();
-    });
-  });
-
   describe('createDocument', () => {
-    it('should create document with valid data', () => {
-      const request: CreateDocumentRequest = { name: 'invoice.pdf' };
-      const document = documentService.createDocument(request);
+    it('should create document with basic data', () => {
+      const document = documentService.createDocument({
+        name: 'document.pdf',
+      });
 
       expect(document.id).toBeDefined();
-      expect(document.name).toBe('invoice.pdf');
+      expect(document.name).toBe('document.pdf');
       expect(document.status).toBe('pending');
       expect(document.createdAt).toBeInstanceOf(Date);
     });
 
+    it('should create document with file information', () => {
+      const document = documentService.createDocument({
+        name: 'invoice.pdf',
+        filepath: 'temp/abc123.pdf',
+        size: 1024,
+        mimetype: 'application/pdf',
+      });
+
+      expect(document.name).toBe('invoice.pdf');
+      expect(document.filepath).toBe('temp/abc123.pdf');
+      expect(document.size).toBe(1024);
+      expect(document.mimetype).toBe('application/pdf');
+    });
+
     it('should trim whitespace from name', () => {
-      const request: CreateDocumentRequest = { name: '  document.pdf  ' };
-      const document = documentService.createDocument(request);
+      const document = documentService.createDocument({
+        name: '  document.pdf  ',
+      });
 
       expect(document.name).toBe('document.pdf');
     });
@@ -112,6 +85,21 @@ describe('Document Service', () => {
       const retrieved = documentService.getDocument(created.id);
 
       expect(retrieved).toEqual(created);
+    });
+
+    it('should return document with file information', () => {
+      const created = documentService.createDocument({
+        name: 'file.pdf',
+        filepath: 'temp/uuid.pdf',
+        size: 2048,
+        mimetype: 'application/pdf',
+      });
+
+      const retrieved = documentService.getDocument(created.id);
+
+      expect(retrieved?.filepath).toBe('temp/uuid.pdf');
+      expect(retrieved?.size).toBe(2048);
+      expect(retrieved?.mimetype).toBe('application/pdf');
     });
   });
 

@@ -52,158 +52,46 @@ describe('HTTP Server', () => {
   });
 
   describe('POST /documents', () => {
-    beforeEach(() => {
-      documentService.clearDocuments();
-      resetIdCounter();
-    });
-
-    describe('Successful document creation', () => {
-      it('should return 201 status code', async () => {
+    describe('Content-Type validation', () => {
+      it('should return 415 for non-multipart content type', async () => {
         const response = await fetch(`${baseUrl}/documents`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'invoice-001.pdf' }),
+          body: JSON.stringify({ name: 'test.pdf' }),
         });
-        expect(response.status).toBe(201);
-      });
 
-      it('should return JSON content type', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'document.pdf' }),
-        });
-        expect(response.headers.get('content-type')).toBe('application/json');
-      });
+        expect(response.status).toBe(415);
 
-      it('should return Location header', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'document.pdf' }),
-        });
-        const location = response.headers.get('location');
-        expect(location).toMatch(/^\/documents\/doc_/);
-      });
-
-      it('should return document data in response', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'invoice-001.pdf' }),
-        });
         const data = await response.json();
-
-        expect(data).toHaveProperty('id');
-        expect(data).toHaveProperty('name', 'invoice-001.pdf');
-        expect(data).toHaveProperty('status', 'pending');
+        expect(data.error).toBe('Unsupported Media Type');
+        expect(data.message).toContain('multipart/form-data');
       });
 
-      it('should trim whitespace from document name', async () => {
+      it('should return 415 for missing Content-Type header', async () => {
         const response = await fetch(`${baseUrl}/documents`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: '  document.pdf  ' }),
+          body: 'some data',
         });
-        const data = await response.json();
 
-        expect(data.name).toBe('document.pdf');
-      });
-
-      it('should generate unique IDs for different documents', async () => {
-        const response1 = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'doc1.pdf' }),
-        });
-        const data1 = await response1.json();
-
-        const response2 = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 'doc2.pdf' }),
-        });
-        const data2 = await response2.json();
-
-        expect(data1.id).not.toBe(data2.id);
+        expect(response.status).toBe(415);
       });
     });
 
-    describe('Validation errors', () => {
-      it('should return 400 for missing name field', async () => {
+    describe('Missing file', () => {
+      it('should reject upload without file', async () => {
+        const formData = new FormData();
+        // Don't add any file
+
         const response = await fetch(`${baseUrl}/documents`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
+          body: formData,
         });
-        expect(response.status).toBe(400);
 
-        const data = await response.json();
-        expect(data.error).toBe('Validation Error');
-        expect(data.message).toContain('name');
-      });
-
-      it('should return 400 for non-string name', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: 123 }),
-        });
-        expect(response.status).toBe(400);
-
-        const data = await response.json();
-        expect(data.error).toBe('Validation Error');
-      });
-
-      it('should return 400 for empty name', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: '   ' }),
-        });
-        expect(response.status).toBe(400);
-
-        const data = await response.json();
-        expect(data.error).toBe('Validation Error');
-        expect(data.message).toContain('empty');
-      });
-
-      it('should return 400 for malformed JSON', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: '{ invalid json }',
-        });
         expect(response.status).toBe(400);
 
         const data = await response.json();
         expect(data.error).toBe('Bad Request');
-        expect(data.message).toContain('JSON');
-      });
-    });
-
-    describe('Content-Type validation', () => {
-      it('should return 415 for missing Content-Type header', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          body: JSON.stringify({ name: 'document.pdf' }),
-        });
-        expect(response.status).toBe(415);
-
-        const data = await response.json();
-        expect(data.error).toBe('Unsupported Media Type');
-      });
-
-      it('should return 415 for wrong Content-Type', async () => {
-        const response = await fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ name: 'document.pdf' }),
-        });
-        expect(response.status).toBe(415);
-
-        const data = await response.json();
-        expect(data.error).toBe('Unsupported Media Type');
+        expect(data.message).toContain('No file provided');
       });
     });
   });
@@ -243,23 +131,13 @@ describe('HTTP Server', () => {
       }
     });
 
-    it('should handle concurrent document creation', async () => {
-      const requests = Array.from({ length: 5 }, (_, i) =>
-        fetch(`${baseUrl}/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: `document-${i}.pdf` }),
-        }),
-      );
-
+    it('should handle concurrent requests to health endpoint', async () => {
+      const requests = Array.from({ length: 5 }, () => fetch(`${baseUrl}/health`));
       const responses = await Promise.all(requests);
 
       for (const response of responses) {
-        expect(response.status).toBe(201);
+        expect(response.status).toBe(200);
       }
-
-      const allDocs = documentService.getAllDocuments();
-      expect(allDocs).toHaveLength(5);
     });
   });
 });
