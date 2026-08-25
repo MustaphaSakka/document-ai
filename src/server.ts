@@ -7,6 +7,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import Busboy from 'busboy';
 import { documentService } from './document-service.js';
 import { streamFileToFile } from './file-handler.js';
+import { triggerDocumentProcessing } from './processor.js';
 
 interface HealthResponse {
   status: string;
@@ -23,6 +24,13 @@ interface DocumentResponse {
   status: string;
   size?: number;
   mimetype?: string;
+  processingResult?: {
+    wordCount: number;
+    pageEstimated: number;
+    processingDuration: number;
+    processedAt: string;
+  };
+  error?: string;
 }
 
 interface BusboyFileObject {
@@ -151,6 +159,9 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
         mimetype: fileResult.mimetype,
       });
 
+      // Trigger async processing (fire and forget)
+      triggerDocumentProcessing(document.id);
+
       // Return 201 Created
       response.statusCode = 201;
       response.setHeader('Content-Type', 'application/json');
@@ -231,6 +242,64 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
 }
 
 /**
+ * Handle GET /documents/:id endpoint
+ */
+function handleGetDocument(request: IncomingMessage, response: ServerResponse): void {
+  // Extract document ID from URL
+  const urlParts = request.url?.split('/');
+  const documentId = urlParts?.[2]; // /documents/:id
+
+  console.log('GET document request - URL:', request.url, 'Parts:', urlParts, 'ID:', documentId);
+  console.log('All documents in service:', documentService.getAllDocuments().map(d => d.id));
+
+  if (!documentId) {
+    response.statusCode = 400;
+    response.setHeader('Content-Type', 'application/json');
+    const errorData: ErrorResponse = {
+      error: 'Bad Request',
+      message: 'Document ID is required',
+    };
+    response.end(JSON.stringify(errorData));
+    return;
+  }
+
+  const document = documentService.getDocument(documentId);
+  console.log('Found document:', document);
+
+  if (!document) {
+    response.statusCode = 404;
+    response.setHeader('Content-Type', 'application/json');
+    const errorData: ErrorResponse = {
+      error: 'Not Found',
+      message: `Document ${documentId} not found`,
+    };
+    response.end(JSON.stringify(errorData));
+    return;
+  }
+
+  response.statusCode = 200;
+  response.setHeader('Content-Type', 'application/json');
+
+  const responseData: DocumentResponse = {
+    id: document.id,
+    name: document.name,
+    status: document.status,
+    size: document.size,
+    mimetype: document.mimetype,
+    processingResult: document.processingResult
+      ? {
+          wordCount: document.processingResult.wordCount,
+          pageEstimated: document.processingResult.pageEstimated,
+          processingDuration: document.processingResult.processingDuration,
+          processedAt: document.processingResult.processedAt.toISOString(),
+        }
+      : undefined,
+    error: document.error,
+  };
+  response.end(JSON.stringify(responseData));
+}
+
+/**
  * Handle GET /health endpoint
  */
 function handleHealth(request: IncomingMessage, response: ServerResponse): void {
@@ -240,6 +309,12 @@ function handleHealth(request: IncomingMessage, response: ServerResponse): void 
 
     const healthData: HealthResponse = { status: 'ok' };
     response.end(JSON.stringify(healthData));
+    return;
+  }
+
+  // Check for GET /documents/:id
+  if (request.method === 'GET' && request.url?.startsWith('/documents/')) {
+    handleGetDocument(request, response);
     return;
   }
 

@@ -19,7 +19,7 @@ export interface FileUploadError {
   message: string;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 const ALLOWED_MIMETYPES = [
   'application/pdf',
   'application/msword',

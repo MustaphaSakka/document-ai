@@ -13,6 +13,15 @@ export interface Document {
   filepath?: string;
   size?: number;
   mimetype?: string;
+  processingResult?: ProcessingResult;
+  error?: string;
+}
+
+export interface ProcessingResult {
+  wordCount: number;
+  pageEstimated: number;
+  processingDuration: number; // in milliseconds
+  processedAt: Date;
 }
 
 export interface CreateDocumentRequest {
@@ -109,6 +118,36 @@ export class DocumentService {
    */
   getAllDocuments(): Document[] {
     return Array.from(this.documents.values());
+  }
+
+  /**
+   * Update document status
+   */
+  updateDocumentStatus(id: string, status: Document['status'], error?: string): boolean {
+    const document = this.documents.get(id);
+    if (!document) {
+      return false;
+    }
+
+    document.status = status;
+    if (error) {
+      document.error = error;
+    }
+    return true;
+  }
+
+  /**
+   * Update document with processing result
+   */
+  updateDocumentResult(id: string, result: ProcessingResult): boolean {
+    const document = this.documents.get(id);
+    if (!document) {
+      return false;
+    }
+
+    document.status = 'completed';
+    document.processingResult = result;
+    return true;
   }
 
   /**
