@@ -24,16 +24,18 @@ describe('Document Service', () => {
       expect(document.createdAt).toBeInstanceOf(Date);
     });
 
-    it('should create document with file information', () => {
+    it('should create document with S3 information', () => {
       const document = documentService.createDocument({
         name: 'invoice.pdf',
-        filepath: 'temp/abc123.pdf',
+        s3Bucket: 'my-bucket',
+        s3Key: 'abc123.pdf',
         size: 1024,
         mimetype: 'application/pdf',
       });
 
       expect(document.name).toBe('invoice.pdf');
-      expect(document.filepath).toBe('temp/abc123.pdf');
+      expect(document.s3Bucket).toBe('my-bucket');
+      expect(document.s3Key).toBe('abc123.pdf');
       expect(document.size).toBe(1024);
       expect(document.mimetype).toBe('application/pdf');
     });
@@ -90,14 +92,16 @@ describe('Document Service', () => {
     it('should return document with file information', () => {
       const created = documentService.createDocument({
         name: 'file.pdf',
-        filepath: 'temp/uuid.pdf',
+        s3Bucket: 'my-bucket',
+        s3Key: 'uuid.pdf',
         size: 2048,
         mimetype: 'application/pdf',
       });
 
       const retrieved = documentService.getDocument(created.id);
 
-      expect(retrieved?.filepath).toBe('temp/uuid.pdf');
+      expect(retrieved?.s3Bucket).toBe('my-bucket');
+      expect(retrieved?.s3Key).toBe('uuid.pdf');
       expect(retrieved?.size).toBe(2048);
       expect(retrieved?.mimetype).toBe('application/pdf');
     });
@@ -112,6 +116,17 @@ describe('Document Service', () => {
 
       documentService.clearDocuments();
       expect(documentService.getAllDocuments()).toHaveLength(0);
+    });
+  });
+
+  describe('Configuration validation', () => {
+    it('should load S3 client with test environment variables', async () => {
+      // This test verifies that the S3 client loads successfully
+      // with the environment variables provided by vitest.config.ts
+      const s3Module = await import('../src/s3-client.js');
+
+      expect(s3Module.s3Client).toBeDefined();
+      expect(s3Module.BUCKET_NAME).toBe('test-bucket');
     });
   });
 });

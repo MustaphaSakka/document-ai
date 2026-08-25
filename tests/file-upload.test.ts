@@ -3,12 +3,9 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import fs from 'node:fs';
-import path from 'node:path';
 import http from 'node:http';
-import { Readable } from 'node:stream';
 import { createServer } from '../src/server';
-import { MAX_FILE_SIZE } from '../src/file-handler';
+import { MAX_FILE_SIZE } from '../src/s3-file-handler';
 import { documentService } from '../src/document-service';
 import { resetIdCounter } from '../src/utils';
 
@@ -17,11 +14,6 @@ let baseUrl: string;
 
 describe('File Upload Tests', () => {
   beforeAll(() => {
-    // Ensure temp directory exists
-    if (!fs.existsSync('temp')) {
-      fs.mkdirSync('temp', { recursive: true });
-    }
-
     // Start server on random available port for testing
     server = createServer();
     server.listen(0);
@@ -35,17 +27,6 @@ describe('File Upload Tests', () => {
   afterAll(() => {
     if (server) {
       server.close();
-    }
-
-    // Clean up temp directory
-    try {
-      const files = fs.readdirSync('temp');
-      files.forEach((file) => {
-        fs.unlinkSync(path.join('temp', file));
-      });
-      fs.rmdirSync('temp');
-    } catch {
-      // Temp directory might not exist
     }
   });
 
@@ -92,7 +73,8 @@ describe('File Upload Tests', () => {
       // Verify file was stored
       const document = documentService.getDocument(data.id);
       expect(document).toBeDefined();
-      expect(document?.filepath).toBeDefined();
+      expect(document?.s3Bucket).toBeDefined();
+      expect(document?.s3Key).toBeDefined();
     });
 
     it('should return Location header', async () => {
@@ -263,7 +245,8 @@ describe('File Upload Tests', () => {
       expect(['pending', 'processing', 'completed']).toContain(document?.status);
       expect(document?.size).toBe(fileContent.length);
       expect(document?.mimetype).toBe('application/pdf');
-      expect(document?.filepath).toBeDefined();
+      expect(document?.s3Bucket).toBeDefined();
+      expect(document?.s3Key).toBeDefined();
       expect(document?.createdAt).toBeInstanceOf(Date);
     });
 
@@ -346,8 +329,8 @@ describe('File Upload Tests', () => {
     });
   });
 
-  describe('File storage', () => {
-    it('should store file in temp directory with unique name', async () => {
+  describe('S3 storage', () => {
+    it('should store document S3 location', async () => {
       const fileContent = Buffer.from('Stored content for testing');
       const boundary = '----test-boundary-storage';
       const crlf = '\r\n';
@@ -370,18 +353,10 @@ describe('File Upload Tests', () => {
       const data = await response.json();
       const document = documentService.getDocument(data.id);
 
-      expect(document?.filepath).toBeDefined();
-      expect(document?.filepath).toMatch(/temp[\/\\]/);
-
-      // Verify file exists in temp directory
-      if (document?.filepath) {
-        const fileExists = fs.existsSync(document.filepath);
-        expect(fileExists).toBe(true);
-
-        // Verify file content matches
-        const storedContent = fs.readFileSync(document.filepath);
-        expect(storedContent).toEqual(fileContent);
-      }
+      expect(document?.s3Bucket).toBeDefined();
+      expect(document?.s3Key).toBeDefined();
+      expect(document?.s3Bucket).toBe('test-bucket');
+      expect(document?.s3Key).toMatch(/\.pdf$/);
     });
   });
 });

@@ -5,6 +5,7 @@
  * processing application using AWS services (S3, Textract, Bedrock).
  */
 
+import 'dotenv/config';
 import { startServer } from './server.js';
 
 const PORT = 3000;

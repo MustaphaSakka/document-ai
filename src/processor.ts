@@ -3,7 +3,8 @@
  * Handles asynchronous document processing
  */
 
-import fs from 'node:fs';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { s3Client } from './s3-client.js';
 import { documentService } from './document-service.js';
 import type { ProcessingResult } from './document-service.js';
 
@@ -27,9 +28,9 @@ export async function processDocument(
   // Update status to processing first
   documentService.updateDocumentStatus(documentId, 'processing');
 
-  if (!document.filepath) {
-    documentService.updateDocumentStatus(documentId, 'failed', 'Document has no file to process');
-    throw new Error(`Document ${documentId} has no file to process`);
+  if (!document.s3Bucket || !document.s3Key) {
+    documentService.updateDocumentStatus(documentId, 'failed', 'Document has no S3 location');
+    throw new Error(`Document ${documentId} has no S3 location`);
   }
 
   // Simulate async processing with setTimeout
@@ -45,7 +46,7 @@ export async function processDocument(
           }
 
           // Perform actual processing
-          const result = await analyzeDocument(document.filepath!);
+          const result = await analyzeDocument(document.s3Bucket!, document.s3Key!);
           documentService.updateDocumentResult(documentId, result);
           resolve();
         } catch (error) {
@@ -61,27 +62,50 @@ export async function processDocument(
 /**
  * Analyze document and extract metrics
  */
-async function analyzeDocument(filepath: string): Promise<ProcessingResult> {
+async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
   const startTime = Date.now();
 
-  // Read file content
-  const content = await fs.promises.readFile(filepath, 'utf-8');
+  try {
+    // Get object from S3
+    const s3Response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: s3Bucket,
+        Key: s3Key,
+      })
+    );
 
-  // Simple text analysis
-  const words = content.split(/\s+/).filter(word => word.length > 0);
-  const wordCount = words.length;
+    // Convert stream to buffer/string
+    const chunks: Buffer[] = [];
+    const stream = s3Response.Body as NodeJS.ReadableStream;
 
-  // Estimate pages (assuming ~250 words per page)
-  const pageEstimated = Math.ceil(wordCount / 250);
+    for await (const chunk of stream) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else {
+        chunks.push(Buffer.from(chunk));
+      }
+    }
 
-  const processingDuration = Date.now() - startTime;
+    const content = Buffer.concat(chunks).toString('utf-8');
 
-  return {
-    wordCount,
-    pageEstimated,
-    processingDuration,
-    processedAt: new Date(),
-  };
+    // Simple text analysis
+    const words = content.split(/\s+/).filter(word => word.length > 0);
+    const wordCount = words.length;
+
+    // Estimate pages (assuming ~250 words per page)
+    const pageEstimated = Math.ceil(wordCount / 250);
+
+    const processingDuration = Date.now() - startTime;
+
+    return {
+      wordCount,
+      pageEstimated,
+      processingDuration,
+      processedAt: new Date(),
+    };
+  } catch (error) {
+    throw new Error(`Failed to read from S3: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
+  }
 }
 
 /**

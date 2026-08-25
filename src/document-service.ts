@@ -10,7 +10,8 @@ export interface Document {
   name: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   createdAt: Date;
-  filepath?: string;
+  s3Bucket?: string;
+  s3Key?: string;
   size?: number;
   mimetype?: string;
   processingResult?: ProcessingResult;
@@ -26,7 +27,8 @@ export interface ProcessingResult {
 
 export interface CreateDocumentRequest {
   name: string;
-  filepath?: string;
+  s3Bucket?: string;
+  s3Key?: string;
   size?: number;
   mimetype?: string;
 }
@@ -97,7 +99,8 @@ export class DocumentService {
       name: request.name.trim(),
       status: 'pending',
       createdAt: new Date(),
-      filepath: request.filepath,
+      s3Bucket: request.s3Bucket,
+      s3Key: request.s3Key,
       size: request.size,
       mimetype: request.mimetype,
     };

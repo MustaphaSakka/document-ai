@@ -6,7 +6,7 @@ import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import Busboy from 'busboy';
 import { documentService } from './document-service.js';
-import { streamFileToFile } from './file-handler.js';
+import { streamFileToS3 } from './s3-file-handler.js';
 import { triggerDocumentProcessing } from './processor.js';
 
 interface HealthResponse {
@@ -66,11 +66,12 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
     });
 
     let fileResult:
-      | { filename: string; filepath: string; size: number; mimetype: string }
+      | { filename: string; s3Bucket: string; s3Key: string; size: number; mimetype: string }
       | null = null;
     let uploadError: Error | null = null;
     let fileUploadComplete = false;
     let fileEventReceived = false;
+    let responseSent = false; // Prevent duplicate responses
 
     // Handle file upload
     busboyInstance.on('file', (_fieldname: string, file: NodeJS.ReadableStream, fileObject: BusboyFileObject) => {
@@ -78,13 +79,16 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
       const filename = fileObject.filename;
       const mimetype = fileObject.mimeType;
 
-      // Stream file and handle completion with callback
-      streamFileToFile(file, filename, mimetype)
+      // Stream file to S3 and handle completion with callback
+      streamFileToS3(file, filename, mimetype)
         .then((result) => {
           if ('error' in result) {
             uploadError = new Error(result.message);
+            // Destroy the stream to stop reading
             const readableStream = file as unknown as { destroy: (error?: Error) => void };
-            readableStream.destroy();
+            if (readableStream.destroy) {
+              readableStream.destroy();
+            }
           } else {
             fileResult = result;
           }
@@ -128,6 +132,12 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
     }
 
     function sendResponse(): void {
+      // Prevent duplicate responses
+      if (responseSent) {
+        return;
+      }
+      responseSent = true;
+
       if (uploadError) {
         console.error('Upload error:', uploadError);
         response.statusCode = 400;
@@ -154,7 +164,8 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
       // Create document record
       const document = documentService.createDocument({
         name: fileResult.filename,
-        filepath: fileResult.filepath,
+        s3Bucket: fileResult.s3Bucket,
+        s3Key: fileResult.s3Key,
         size: fileResult.size,
         mimetype: fileResult.mimetype,
       });
@@ -176,6 +187,9 @@ function handleCreateDocument(request: IncomingMessage, response: ServerResponse
       };
       response.end(JSON.stringify(responseData));
     }
+
+    // Pipe request to busboy
+    request.pipe(busboyInstance);
 
     // Handle busboy errors
     busboyInstance.on('error', (error) => {
