@@ -2,7 +2,7 @@
  * Main entry point for the document processing application
  *
  * This is a minimal starting point that will evolve into a document
- * processing application using AWS services (S3, Textract, Bedrock).
+ * processing application using AWS services (S3, Bedrock).
  */
 
 import 'dotenv/config';

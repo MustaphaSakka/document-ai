@@ -19,7 +19,6 @@
   "keywords": [
     "document-processing",
     "aws",
-    "textract",
     "bedrock"
   ],
   "author": "",
@@ -41,7 +40,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1117.0",
-    "@aws-sdk/client-textract": "^3.1118.0",
     "busboy": "^1.6.0",
     "dotenv": "^17.4.2"
   }

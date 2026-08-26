@@ -1,10 +1,11 @@
 /**
  * Document Processor
- * Handles asynchronous document processing with AWS Textract
+ * Handles asynchronous document processing
  */
 
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { s3Client } from './s3-client.js';
 import { documentService } from './document-service.js';
-import { startTextDetection, pollTextDetection, extractTextFromBlocks } from './textract-processor.js';
 import type { ProcessingResult } from './document-service.js';
 
 export interface ProcessingOptions {
@@ -13,7 +14,7 @@ export interface ProcessingOptions {
 }
 
 /**
- * Process a document asynchronously with Textract
+ * Process a document asynchronously
  */
 export async function processDocument(
   documentId: string,
@@ -44,8 +45,8 @@ export async function processDocument(
             return;
           }
 
-          // Perform actual processing with Textract
-          const result = await analyzeDocumentWithTextract(document.s3Bucket!, document.s3Key!);
+          // Perform actual processing
+          const result = await analyzeDocument(document.s3Bucket!, document.s3Key!);
           documentService.updateDocumentResult(documentId, result);
           resolve();
         } catch (error) {
@@ -59,32 +60,48 @@ export async function processDocument(
 }
 
 /**
- * Analyze document using AWS Textract
+ * Analyze document and extract metrics
+ * NOTE: Loads entire document into memory. Suitable for learning/small documents.
+ * For production, consider stream-based processing or size limits.
  */
-async function analyzeDocumentWithTextract(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
+async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
   const startTime = Date.now();
+  const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit for memory safety
+  let totalSize = 0;
 
   try {
-    // Start async text detection job
-    console.log(`Starting Textract job for ${s3Bucket}/${s3Key}`);
-    const jobId = await startTextDetection(s3Bucket, s3Key);
-    console.log(`Textract job started: ${jobId}`);
+    // Get object from S3
+    const s3Response = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: s3Bucket,
+        Key: s3Key,
+      })
+    );
 
-    // Poll for results
-    const response = await pollTextDetection(jobId);
-    console.log(`Textract job completed: ${jobId}, Status: ${response.JobStatus}`);
+    // Convert stream to buffer/string with size limit
+    const chunks: Buffer[] = [];
+    const stream = s3Response.Body as NodeJS.ReadableStream;
 
-    // Check if job failed
-    if (response.JobStatus === 'FAILED' || response.JobStatus === 'PARTIAL_SUCCESS') {
-      const message = response.StatusMessage || 'Textract processing failed';
-      throw new Error(`Textract job failed: ${message}`);
+    for await (const chunk of stream) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+        totalSize += chunk.length;
+      } else {
+        const buffer = Buffer.from(chunk);
+        chunks.push(buffer);
+        totalSize += buffer.length;
+      }
+
+      // Prevent memory issues with large documents
+      if (totalSize > MAX_SIZE_BYTES) {
+        throw new Error(`Document too large (${Math.round(totalSize / 1024 / 1024)}MB). Maximum size: ${Math.round(MAX_SIZE_BYTES / 1024 / 1024)}MB`);
+      }
     }
 
-    // Extract text from Textract blocks
-    const extractedText = extractTextFromBlocks(response.Blocks);
+    const content = Buffer.concat(chunks).toString('utf-8');
 
-    // Calculate metrics from extracted text
-    const words = extractedText.split(/\s+/).filter(word => word.length > 0);
+    // Simple text analysis
+    const words = content.split(/\s+/).filter(word => word.length > 0);
     const wordCount = words.length;
 
     // Estimate pages (assuming ~250 words per page)
@@ -99,7 +116,7 @@ async function analyzeDocumentWithTextract(s3Bucket: string, s3Key: string): Pro
       processedAt: new Date(),
     };
   } catch (error) {
-    throw new Error(`Textract processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
+    throw new Error(`Failed to read from S3: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
   }
 }
 

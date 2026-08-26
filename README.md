@@ -1,6 +1,6 @@
 # Document AI
 
-A document processing application built with Node.js and TypeScript, designed to integrate with AWS services (S3, Textract, Bedrock).
+A document processing application built with Node.js and TypeScript, designed to integrate with AWS services (S3, Bedrock).
 
 ## 🚀 Quick Start
 
@@ -28,7 +28,7 @@ This project is a learning-focused document processing application that demonstr
 - ✅ **Vitest** testing framework setup
 - ✅ **ESLint + Prettier** code quality tools
 - ✅ **Modern development workflow** with hot reload
-- 🔄 **AWS Integration**: Coming soon (S3, Textract, Bedrock)
+- 🔄 **AWS Integration**: Coming soon (S3, Bedrock)
 
 ## 🛠️ Tech Stack
 
@@ -45,7 +45,6 @@ This project is a learning-focused document processing application that demonstr
 
 ### Planned AWS Integration
 - **Amazon S3**: Document storage
-- **AWS Textract**: Document text extraction
 - **Amazon Bedrock**: AI/ML services
 
 ## 📁 Project Structure
@@ -251,7 +250,6 @@ tests/
 
 ### Phase 3: AWS Integration (Future)
 - S3 storage integration
-- Textract document processing
 - Bedrock AI services
 - AWS authentication and configuration
 

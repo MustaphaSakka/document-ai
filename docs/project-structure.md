@@ -312,7 +312,7 @@ As requirements emerge, the structure may evolve to include:
 **Service Layer** (for AWS integration):
 ```
 src/services/
-├── textract-service.ts
+├── document-service.ts
 ├── bedrock-service.ts
 └── s3-service.ts
 ```

@@ -2,7 +2,7 @@ I want you to act as my Node.js and TypeScript development partner for this proj
 
 Project:
 
-I want to build a document processing application that will eventually use AWS services such as S3, Textract and Bedrock.
+I want to build a document processing application that will eventually use AWS services such as S3 and Bedrock.
 
 My objective is not only to build the application. I want to be an expert with Node.js and TypeScript.
 
