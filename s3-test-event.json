@@ -1,0 +1,14 @@
+{
+  "Records": [
+    {
+      "s3": {
+        "bucket": {
+          "name": "document-ai-dev-node-js-trail"
+        },
+        "object": {
+          "key": "documents/facture-test-textract.pdf"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+# Minimal Docker reproduction for pdf2json on Amazon Linux 2023 + Node.js 24.x
+# This reproduces the AWS Lambda environment to diagnose pdf2json issues
+
+FROM amazonlinux:2023
+
+# Install Node.js 24.x explicitly
+RUN dnf install -y tar gzip xz && \
+    curl -fsSL https://nodejs.org/dist/v24.13.0/node-v24.13.0-linux-x64.tar.xz | tar -xJ -C /usr/local --strip-components=1 && \
+    node --version && \
+    npm --version
+
+# Create working directory
+WORKDIR /app
+
+# Copy test PDF
+COPY temp/5e5e0301-0f52-4fb9-8350-02a0f40ea444.pdf /app/test.pdf
+
+# Create minimal test script
+RUN cat > /app/test-pdf2json.cjs << 'EOF'
+const path = require('path');
+const PDFParser = require('pdf2json');
+const fs = require('fs');
+
+console.log('=== PDF2JSON LAMBDA ENVIRONMENT TEST ===');
+console.log('Node.js version:', process.version);
+console.log('Platform:', process.platform, process.arch);
+console.log('OS:', require('os').release());
+console.log('PDF file: /app/test.pdf');
+
+// Read PDF
+const pdfBuffer = fs.readFileSync('/app/test.pdf');
+console.log('PDF size:', pdfBuffer.length, 'bytes');
+
+// Test PDF parsing
+const pdfParser = new PDFParser();
+let completed = false;
+let success = false;
+let result = null;
+
+pdfParser.on('pdfParser_dataReady', (pdfData) => {
+  completed = true;
+  success = true;
+  result = pdfData;
+
+  const pageCount = pdfData.Pages ? pdfData.Pages.length : 0;
+  let textLength = 0;
+
+  if (pdfData.Pages && Array.isArray(pdfData.Pages)) {
+    pdfData.Pages.forEach((page) => {
+      if (page.Texts && Array.isArray(page.Texts)) {
+        page.Texts.forEach((textItem) => {
+          if (textItem.R && Array.isArray(textItem.R)) {
+            textItem.R.forEach((run) => {
+              if (run.T && typeof run.T === 'string') {
+                textLength += run.T.length;
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+
+  console.log('✅ SUCCESS: PDF parsing completed');
+  console.log('Pages:', pageCount);
+  console.log('Text length:', textLength);
+  process.exit(0);
+});
+
+pdfParser.on('pdfParser_dataError', (error) => {
+  completed = true;
+  success = false;
+  console.log('❌ ERROR: PDF parsing failed');
+  console.log('Error:', error.message || error);
+  console.log('Stack:', error.stack ? error.stack.split('\\n').slice(0, 5).join('\\n') : 'No stack');
+  process.exit(1);
+});
+
+pdfParser.parseBuffer(pdfBuffer);
+
+// Timeout handling
+setTimeout(() => {
+  if (!completed) {
+    console.log('❌ ERROR: Test timed out after 10 seconds');
+    process.exit(1);
+  }
+}, 10000);
+EOF
+
+# Install pdf2json@4.0.3
+RUN npm init -y && \
+    npm install pdf2json@4.0.3 && \
+    node -e "console.log('pdf2json version:', require('./node_modules/pdf2json/package.json').version)"
+
+# Run the test
+CMD ["node", "/app/test-pdf2json.cjs"]

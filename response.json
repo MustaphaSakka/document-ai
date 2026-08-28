@@ -1,0 +1,1 @@
+{"statusCode":500,"body":"{\"message\":\"Completed with 1 errors\",\"processedFiles\":[],\"errors\":[\"Failed to process documents/facture-test-textract.pdf: PDF extraction failed: PDF parsing error: Unknown parsing error\"]}","processedFiles":[],"errors":["Failed to process documents/facture-test-textract.pdf: PDF extraction failed: PDF parsing error: Unknown parsing error"]}

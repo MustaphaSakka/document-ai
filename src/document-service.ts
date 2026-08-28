@@ -23,6 +23,8 @@ export interface ProcessingResult {
   pageEstimated: number;
   processingDuration: number; // in milliseconds
   processedAt: Date;
+  extractedText?: string;
+  numpages?: number;
 }
 
 export interface CreateDocumentRequest {
@@ -158,6 +160,24 @@ export class DocumentService {
    */
   clearDocuments(): void {
     this.documents.clear();
+  }
+
+  /**
+   * Get extracted text result key for a document
+   */
+  getExtractedTextKey(documentId: string): string | null {
+    const document = this.documents.get(documentId);
+    if (!document || !document.s3Key) {
+      return null;
+    }
+
+    // Extract document ID from S3 key (documents/{uuid}.pdf -> {uuid})
+    const match = document.s3Key.match(/^documents\/([a-z0-9-]+)\.pdf$/i);
+    if (!match) {
+      return null;
+    }
+
+    return `documents/${match[1]}-extracted.json`;
   }
 }
 

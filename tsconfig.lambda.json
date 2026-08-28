@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    /* Modules - CommonJS for Lambda */
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "outDir": "./dist-lambda",
+
+    /* Emit - CommonJS compatible */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* No source maps needed for Lambda */
+    "sourceMap": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/lambda/**/*", "src/extractors/**/*", "src/s3-client.ts", "src/utils.ts", "src/types/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+}
