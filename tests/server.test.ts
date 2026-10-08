@@ -219,8 +219,13 @@ describe('HTTP Server', () => {
 
     it('should return 404 for unsupported methods on known routes', async () => {
       const response = await fetch(`${baseUrl}/documents`, {
-        method: 'GET',
+        method: 'PUT',
       });
+      expect(response.status).toBe(404);
+    });
+
+    it('should return 404 for an unknown sub-route', async () => {
+      const response = await fetch(`${baseUrl}/documents/any-id/unknown`);
       expect(response.status).toBe(404);
     });
   });

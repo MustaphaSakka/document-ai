@@ -1,13 +1,20 @@
 /**
  * HTTP Server using Node.js built-in http module
+ *
+ * The server is a thin router: it parses the request path, finds the matching
+ * route and delegates to a handler. Handlers live in `src/routes/`.
  */
 
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import Busboy from 'busboy';
-import { documentService } from './document-service.js';
-import { streamFileToS3 } from './s3-file-handler.js';
-import { triggerDocumentProcessing } from './processor.js';
+import {
+  createDocument,
+  deleteDocument,
+  getDocument,
+  getDocumentStatus,
+  getDocumentText,
+  listDocuments,
+} from './routes/documents.js';
 
 interface HealthResponse {
   status: string;
@@ -18,349 +25,134 @@ interface ErrorResponse {
   message?: string;
 }
 
-interface DocumentResponse {
-  id: string;
-  name: string;
-  status: string;
-  size?: number;
-  mimetype?: string;
-  processingResult?: {
-    wordCount: number;
-    pageEstimated: number;
-    processingDuration: number;
-    processedAt: string;
-  };
-  error?: string;
-}
+type RouteHandler = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  params: Record<string, string>,
+) => void | Promise<void>;
 
-interface BusboyFileObject {
-  filename: string;
-  encoding: string;
-  mimeType: string;
+interface Route {
+  method: string;
+  segments: string[];
+  handler: RouteHandler;
 }
 
 /**
- * Handle POST /documents endpoint with file upload
+ * GET /health
  */
-function handleCreateDocument(request: IncomingMessage, response: ServerResponse): void {
-  try {
-    // Validate content type
-    const contentType = request.headers['content-type'];
-    if (!contentType || !contentType.includes('multipart/form-data')) {
-      response.statusCode = 415;
-      response.setHeader('Content-Type', 'application/json');
-      const errorData: ErrorResponse = {
-        error: 'Unsupported Media Type',
-        message: 'Content-Type must be multipart/form-data',
-      };
-      response.end(JSON.stringify(errorData));
-      return;
-    }
-
-    // Parse multipart form data using busboy
-    const busboyInstance = Busboy({
-      headers: request.headers,
-      limits: {
-        fileSize: 10 * 1024 * 1024, // 10 MB limit
-      },
-    });
-
-    let fileResult:
-      | { filename: string; s3Bucket: string; s3Key: string; size: number; mimetype: string }
-      | null = null;
-    let uploadError: Error | null = null;
-    let fileUploadComplete = false;
-    let fileEventReceived = false;
-    let responseSent = false; // Prevent duplicate responses
-
-    // Handle file upload
-    busboyInstance.on('file', (_fieldname: string, file: NodeJS.ReadableStream, fileObject: BusboyFileObject) => {
-      fileEventReceived = true;
-      const filename = fileObject.filename;
-      const mimetype = fileObject.mimeType;
-
-      // Stream file to S3 and handle completion with callback
-      streamFileToS3(file, filename, mimetype)
-        .then((result) => {
-          if ('error' in result) {
-            uploadError = new Error(result.message);
-            // Destroy the stream to stop reading
-            const readableStream = file as unknown as { destroy: (error?: Error) => void };
-            if (readableStream.destroy) {
-              readableStream.destroy();
-            }
-          } else {
-            fileResult = result;
-          }
-          fileUploadComplete = true;
-
-          // Check if we can send response
-          checkAndSendResponse();
-        })
-        .catch((error: Error) => {
-          uploadError = error;
-          fileUploadComplete = true;
-
-          // Check if we can send response
-          checkAndSendResponse();
-        });
-    });
-
-    // Track when busboy finishes parsing
-    let busboyFinished = false;
-
-    busboyInstance.on('finish', () => {
-      busboyFinished = true;
-
-      // If no file was received, mark upload as complete
-      if (!fileEventReceived) {
-        fileUploadComplete = true;
-      }
-
-      // Check if we can send response
-      checkAndSendResponse();
-    });
-
-    // Function to check if both operations are complete and send response
-    function checkAndSendResponse(): void {
-      // Only send response when both are complete
-      if (!busboyFinished || !fileUploadComplete) {
-        return;
-      }
-
-      sendResponse();
-    }
-
-    function sendResponse(): void {
-      // Prevent duplicate responses
-      if (responseSent) {
-        return;
-      }
-      responseSent = true;
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        response.statusCode = 400;
-        response.setHeader('Content-Type', 'application/json');
-        const errorData: ErrorResponse = {
-          error: 'Upload Failed',
-          message: uploadError.message,
-        };
-        response.end(JSON.stringify(errorData));
-        return;
-      }
-
-      if (!fileResult) {
-        response.statusCode = 400;
-        response.setHeader('Content-Type', 'application/json');
-        const errorData: ErrorResponse = {
-          error: 'Bad Request',
-          message: 'No file provided',
-        };
-        response.end(JSON.stringify(errorData));
-        return;
-      }
-
-      // Create document record
-      const document = documentService.createDocument({
-        name: fileResult.filename,
-        s3Bucket: fileResult.s3Bucket,
-        s3Key: fileResult.s3Key,
-        size: fileResult.size,
-        mimetype: fileResult.mimetype,
-      });
-
-      // Trigger async processing (fire and forget)
-      triggerDocumentProcessing(document.id);
-
-      // Return 201 Created
-      response.statusCode = 201;
-      response.setHeader('Content-Type', 'application/json');
-      response.setHeader('Location', `/documents/${document.id}`);
-
-      const responseData: DocumentResponse = {
-        id: document.id,
-        name: document.name,
-        status: document.status,
-        size: document.size,
-        mimetype: document.mimetype,
-      };
-      response.end(JSON.stringify(responseData));
-    }
-
-    // Pipe request to busboy
-    request.pipe(busboyInstance);
-
-    // Handle busboy errors
-    busboyInstance.on('error', (error) => {
-      console.error('Busboy error:', error);
-      if (!response.headersSent) {
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        const errorData: ErrorResponse = {
-          error: 'Internal Server Error',
-          message: 'Failed to process file upload',
-        };
-        response.end(JSON.stringify(errorData));
-      }
-    });
-
-    // Add debug logging for busboy events
-    busboyInstance.on('partsLimit', () => {
-      console.log('Parts limit reached');
-    });
-
-    busboyInstance.on('filesLimit', () => {
-      console.log('Files limit reached');
-    });
-
-    busboyInstance.on('fieldsLimit', () => {
-      console.log('Fields limit reached');
-    });
-
-    // Pipe request to busboy and handle completion
-    request.pipe(busboyInstance);
-
-    // Handle request end
-    request.on('end', () => {
-      // Set busboy finished flag if finish event hasn't fired yet
-      if (!busboyFinished) {
-        busboyFinished = true;
-        checkAndSendResponse();
-      }
-    });
-
-    // Handle request errors
-    request.on('error', (error) => {
-      console.error('Request error:', error);
-      if (!response.headersSent) {
-        response.statusCode = 500;
-        response.setHeader('Content-Type', 'application/json');
-        const errorData: ErrorResponse = {
-          error: 'Internal Server Error',
-          message: 'Request processing failed',
-        };
-        response.end(JSON.stringify(errorData));
-      }
-    });
-  } catch (error) {
-    console.error('Error creating document:', error);
-    response.statusCode = 500;
-    response.setHeader('Content-Type', 'application/json');
-    const errorData: ErrorResponse = {
-      error: 'Internal Server Error',
-      message: 'An error occurred while creating the document',
-    };
-    response.end(JSON.stringify(errorData));
-  }
-}
-
-/**
- * Handle GET /documents/:id endpoint
- */
-function handleGetDocument(request: IncomingMessage, response: ServerResponse): void {
-  // Extract document ID from URL
-  const urlParts = request.url?.split('/');
-  const documentId = urlParts?.[2]; // /documents/:id
-
-  console.log('GET document request - URL:', request.url, 'Parts:', urlParts, 'ID:', documentId);
-  console.log('All documents in service:', documentService.getAllDocuments().map(d => d.id));
-
-  if (!documentId) {
-    response.statusCode = 400;
-    response.setHeader('Content-Type', 'application/json');
-    const errorData: ErrorResponse = {
-      error: 'Bad Request',
-      message: 'Document ID is required',
-    };
-    response.end(JSON.stringify(errorData));
-    return;
-  }
-
-  const document = documentService.getDocument(documentId);
-  console.log('Found document:', document);
-
-  if (!document) {
-    response.statusCode = 404;
-    response.setHeader('Content-Type', 'application/json');
-    const errorData: ErrorResponse = {
-      error: 'Not Found',
-      message: `Document ${documentId} not found`,
-    };
-    response.end(JSON.stringify(errorData));
-    return;
-  }
+function handleHealth(_request: IncomingMessage, response: ServerResponse): void {
+  const healthData: HealthResponse = { status: 'ok' };
 
   response.statusCode = 200;
   response.setHeader('Content-Type', 'application/json');
-
-  const responseData: DocumentResponse = {
-    id: document.id,
-    name: document.name,
-    status: document.status,
-    size: document.size,
-    mimetype: document.mimetype,
-    processingResult: document.processingResult
-      ? {
-          wordCount: document.processingResult.wordCount,
-          pageEstimated: document.processingResult.pageEstimated,
-          processingDuration: document.processingResult.processingDuration,
-          processedAt: document.processingResult.processedAt.toISOString(),
-        }
-      : undefined,
-    error: document.error,
-  };
-  response.end(JSON.stringify(responseData));
-}
-
-/**
- * Handle GET /health endpoint
- */
-function handleHealth(request: IncomingMessage, response: ServerResponse): void {
-  if (request.method === 'GET' && request.url === '/health') {
-    response.statusCode = 200;
-    response.setHeader('Content-Type', 'application/json');
-
-    const healthData: HealthResponse = { status: 'ok' };
-    response.end(JSON.stringify(healthData));
-    return;
-  }
-
-  // Check for GET /documents/:id
-  if (request.method === 'GET' && request.url?.startsWith('/documents/')) {
-    handleGetDocument(request, response);
-    return;
-  }
-
-  // Check for POST /documents
-  if (request.method === 'POST' && request.url === '/documents') {
-    void handleCreateDocument(request, response);
-    return;
-  }
-
-  handleNotFound(response);
+  response.end(JSON.stringify(healthData));
 }
 
 /**
  * Handle 404 Not Found
  */
 function handleNotFound(response: ServerResponse): void {
+  const errorData: ErrorResponse = { error: 'Not Found' };
+
   response.statusCode = 404;
   response.setHeader('Content-Type', 'application/json');
-
-  const errorData: ErrorResponse = { error: 'Not Found' };
   response.end(JSON.stringify(errorData));
+}
+
+/**
+ * Route table. Matched on the exact number of path segments, so
+ * `/documents/:id` cannot swallow `/documents/:id/status`.
+ * A segment starting with ':' captures its value into params.
+ */
+const routes: Route[] = [
+  { method: 'GET', segments: ['health'], handler: handleHealth },
+  { method: 'POST', segments: ['documents'], handler: createDocument },
+  { method: 'GET', segments: ['documents'], handler: listDocuments },
+  { method: 'GET', segments: ['documents', ':id'], handler: getDocument },
+  { method: 'GET', segments: ['documents', ':id', 'status'], handler: getDocumentStatus },
+  { method: 'GET', segments: ['documents', ':id', 'text'], handler: getDocumentText },
+  { method: 'DELETE', segments: ['documents', ':id'], handler: deleteDocument },
+];
+
+/**
+ * Find the first route matching both the method and the path segments
+ */
+function matchRoute(
+  method: string,
+  segments: string[],
+): { handler: RouteHandler; params: Record<string, string> } | null {
+  for (const route of routes) {
+    if (route.method !== method || route.segments.length !== segments.length) {
+      continue;
+    }
+
+    const params: Record<string, string> = {};
+    let matched = true;
+
+    for (const [index, part] of route.segments.entries()) {
+      const value = segments[index] ?? '';
+
+      if (part.startsWith(':')) {
+        params[part.slice(1)] = value;
+      } else if (part !== value) {
+        matched = false;
+        break;
+      }
+    }
+
+    if (matched) {
+      return { handler: route.handler, params };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Run a route handler, turning any thrown error or rejected promise into a 500
+ */
+async function runHandler(
+  handler: RouteHandler,
+  request: IncomingMessage,
+  response: ServerResponse,
+  params: Record<string, string>,
+  pathname: string,
+): Promise<void> {
+  try {
+    await handler(request, response, params);
+  } catch (error) {
+    console.error(`Error handling ${request.method ?? 'UNKNOWN'} ${pathname}:`, error);
+
+    if (!response.headersSent) {
+      const errorData: ErrorResponse = {
+        error: 'Internal Server Error',
+        message: 'An unexpected error occurred',
+      };
+      response.statusCode = 500;
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify(errorData));
+    }
+  }
 }
 
 /**
  * Create and configure HTTP server
  */
 export function createServer(): http.Server {
-  const server = http.createServer((request: IncomingMessage, response: ServerResponse) => {
-    handleHealth(request, response);
-  });
+  return http.createServer((request: IncomingMessage, response: ServerResponse) => {
+    // request.url is the raw path plus query string, e.g. "/documents?limit=10".
+    // new URL() turns it into a pathname we can match on.
+    const { pathname } = new URL(request.url ?? '/', 'http://localhost');
+    const segments = pathname.split('/').slice(1); // drop the leading ''
+    const match = matchRoute(request.method ?? 'GET', segments);
 
-  return server;
+    if (!match) {
+      handleNotFound(response);
+      return;
+    }
+
+    void runHandler(match.handler, request, response, match.params, pathname);
+  });
 }
 
 /**
@@ -372,7 +164,7 @@ export function startServer(port: number): http.Server {
   server.listen(port, () => {
     console.log(`🚀 Server listening on http://localhost:${port}`);
     console.log(`📊 Health check: http://localhost:${port}/health`);
-    console.log(`📄 Document submission: POST http://localhost:${port}/documents`);
+    console.log(`📄 Documents: http://localhost:${port}/documents`);
   });
 
   return server;

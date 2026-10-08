@@ -119,6 +119,30 @@ describe('Document Service', () => {
     });
   });
 
+  describe('deleteDocument', () => {
+    it('should delete an existing document', () => {
+      const document = documentService.createDocument({ name: 'doc.pdf' });
+
+      expect(documentService.deleteDocument(document.id)).toBe(true);
+      expect(documentService.getDocument(document.id)).toBeUndefined();
+      expect(documentService.getAllDocuments()).toHaveLength(0);
+    });
+
+    it('should return false for an unknown document', () => {
+      expect(documentService.deleteDocument('unknown')).toBe(false);
+    });
+
+    it('should only delete the requested document', () => {
+      const first = documentService.createDocument({ name: 'first.pdf' });
+      const second = documentService.createDocument({ name: 'second.pdf' });
+
+      documentService.deleteDocument(first.id);
+
+      expect(documentService.getDocument(first.id)).toBeUndefined();
+      expect(documentService.getDocument(second.id)).toBeDefined();
+    });
+  });
+
   describe('Configuration validation', () => {
     it('should load S3 client with test environment variables', async () => {
       // This test verifies that the S3 client loads successfully

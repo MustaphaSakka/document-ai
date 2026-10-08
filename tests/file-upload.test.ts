@@ -2,10 +2,11 @@
  * Tests for file upload functionality
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import http from 'node:http';
 import { createServer } from '../src/server';
 import { MAX_FILE_SIZE } from '../src/s3-file-handler';
+import { s3Client } from '../src/s3-client';
 import { documentService } from '../src/document-service';
 import { resetIdCounter } from '../src/utils';
 
@@ -160,9 +161,9 @@ describe('File Upload Tests', () => {
   });
 
   describe('File size validation', () => {
-    it('should enforce 10MB file size limit and accept files within limit', async () => {
+    it('should enforce the 5MB limit and accept files within it', async () => {
       // Test the size limit constant
-      expect(MAX_FILE_SIZE).toBe(10 * 1024 * 1024); // 10MB
+      expect(MAX_FILE_SIZE).toBe(5 * 1024 * 1024); // 5MB
 
       // Create a small file that's within the limit
       const smallContent = Buffer.from('Test content within size limit');
@@ -185,6 +186,48 @@ describe('File Upload Tests', () => {
       });
 
       expect(response.status).toBe(201);
+    });
+
+    it('should reject a file over 5MB with 413 and leave nothing in S3', async () => {
+      const boundary = '----test-boundary-oversize';
+      const crlf = '\r\n';
+
+      // Just over the limit: busboy truncates here instead of failing
+      const oversizeContent = Buffer.alloc(MAX_FILE_SIZE + 1024, 0x41); // 5MB + 1KB of 'A'
+
+      const head = Buffer.from(
+        `--${boundary}${crlf}` +
+          `Content-Disposition: form-data; name="file"; filename="oversize.pdf"${crlf}` +
+          `Content-Type: application/pdf${crlf}${crlf}`,
+      );
+      const tail = Buffer.from(`${crlf}--${boundary}--${crlf}`);
+      const formData = Buffer.concat([head, oversizeContent, tail]);
+
+      // Ignore the uploads performed by the previous tests
+      vi.mocked(s3Client.send).mockClear();
+
+      const response = await fetch(`${baseUrl}/documents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        },
+        body: formData,
+      });
+
+      expect(response.status).toBe(413);
+
+      const data = await response.json();
+      expect(data.error).toBe('Payload Too Large');
+      expect(data.message).toContain('5MB');
+
+      // No truncated object may reach S3
+      const putObjectCalls = vi
+        .mocked(s3Client.send)
+        .mock.calls.filter(([command]) => command.constructor.name === 'PutObjectCommand');
+      expect(putObjectCalls).toHaveLength(0);
+
+      // And no document record may be created
+      expect(documentService.getAllDocuments()).toHaveLength(0);
     });
   });
 

@@ -19,9 +19,12 @@ export interface S3UploadResult {
 export interface S3UploadError {
   error: string;
   message: string;
+  /** HTTP status the caller should answer with, when the failure maps to one. */
+  statusCode?: number;
 }
 
-export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+/** Single source of truth for the upload size limit: also used as the busboy fileSize limit. */
+export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_MIMETYPES = [
   'application/pdf',
   'application/msword',
@@ -61,29 +64,54 @@ export async function streamFileToS3(
 
   let receivedBytes = 0;
   let fileSize = 0;
+  let tooLarge = false;
+
+  const payloadTooLarge = (): S3UploadError => ({
+    error: 'Payload Too Large',
+    message: `File size exceeds the maximum allowed size of ${MAX_FILE_SIZE / 1024 / 1024}MB`,
+    statusCode: 413,
+  });
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
 
+    const stopReading = (): void => {
+      const streamWithDestroy = fileStream as unknown as { destroy?: (error?: Error) => void };
+      streamWithDestroy.destroy?.();
+    };
+
+    // busboy truncates the stream instead of failing when its fileSize limit is
+    // reached, so 'limit' is the only signal that the file is too large.
+    fileStream.on('limit', () => {
+      tooLarge = true;
+      stopReading();
+      resolve(payloadTooLarge());
+    });
+
     // Handle file data chunks
     fileStream.on('data', (chunk: Buffer) => {
+      if (tooLarge) {
+        return;
+      }
+
       receivedBytes += chunk.length;
       chunks.push(chunk);
 
-      // Check file size limit
+      // Defensive guard: the stream itself is also bounded by the caller
       if (receivedBytes > MAX_FILE_SIZE) {
-        // Try to destroy the stream, but don't fail if it doesn't exist
-        const streamWithDestroy = fileStream as unknown as { destroy: (error?: Error) => void };
-        if (streamWithDestroy.destroy) {
-          streamWithDestroy.destroy(new Error('File size exceeds maximum allowed size'));
-        }
-        reject(new Error(`File size exceeds maximum allowed size of ${MAX_FILE_SIZE / 1024 / 1024}MB`));
-        return;
+        tooLarge = true;
+        stopReading();
+        resolve(payloadTooLarge());
       }
     });
 
     // Handle file stream completion
     fileStream.on('end', () => {
+      // A truncated file must never be uploaded
+      if (tooLarge) {
+        return;
+      }
+
       fileSize = receivedBytes;
 
       void (async (): Promise<void> => {

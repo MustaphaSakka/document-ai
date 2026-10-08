@@ -7,6 +7,8 @@ import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { s3Client } from './s3-client.js';
 import { documentService } from './document-service.js';
 import type { ProcessingResult } from './document-service.js';
+import { extractPDFText, getTextStatistics } from './extractors/pdf-text-extractor.js';
+import { MAX_FILE_SIZE } from './s3-file-handler.js';
 
 export interface ProcessingOptions {
   simulateDelay?: number; // milliseconds
@@ -46,7 +48,11 @@ export async function processDocument(
           }
 
           // Perform actual processing
-          const result = await analyzeDocument(document.s3Bucket!, document.s3Key!);
+          const result = await analyzeDocument(
+            document.s3Bucket!,
+            document.s3Key!,
+            document.mimetype,
+          );
           documentService.updateDocumentResult(documentId, result);
           resolve();
         } catch (error) {
@@ -60,14 +66,18 @@ export async function processDocument(
 }
 
 /**
- * Analyze document and extract metrics
+ * Analyze document and extract text plus metrics
  * NOTE: Loads entire document into memory. Suitable for learning/small documents.
  * For production, consider stream-based processing or size limits.
  */
-async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<ProcessingResult> {
+async function analyzeDocument(
+  s3Bucket: string,
+  s3Key: string,
+  mimetype?: string,
+): Promise<ProcessingResult> {
   const startTime = Date.now();
-  const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB limit for memory safety
   let totalSize = 0;
+  let content: Buffer;
 
   try {
     // Get object from S3
@@ -93,31 +103,54 @@ async function analyzeDocument(s3Bucket: string, s3Key: string): Promise<Process
       }
 
       // Prevent memory issues with large documents
-      if (totalSize > MAX_SIZE_BYTES) {
-        throw new Error(`Document too large (${Math.round(totalSize / 1024 / 1024)}MB). Maximum size: ${Math.round(MAX_SIZE_BYTES / 1024 / 1024)}MB`);
+      if (totalSize > MAX_FILE_SIZE) {
+        throw new Error(
+          `Document too large (${Math.round(totalSize / 1024 / 1024)}MB). ` +
+            `Maximum size: ${MAX_FILE_SIZE / 1024 / 1024}MB`,
+        );
       }
     }
 
-    const content = Buffer.concat(chunks).toString('utf-8');
-
-    // Simple text analysis
-    const words = content.split(/\s+/).filter(word => word.length > 0);
-    const wordCount = words.length;
-
-    // Estimate pages (assuming ~250 words per page)
-    const pageEstimated = Math.ceil(wordCount / 250);
-
-    const processingDuration = Date.now() - startTime;
-
-    return {
-      wordCount,
-      pageEstimated,
-      processingDuration,
-      processedAt: new Date(),
-    };
+    content = Buffer.concat(chunks);
   } catch (error) {
     throw new Error(`Failed to read from S3: ${error instanceof Error ? error.message : 'Unknown error'}`, { cause: error });
   }
+
+  // PDFs need a real parser: splitting the raw bytes on whitespace would only
+  // count binary noise, not words.
+  if (mimetype === 'application/pdf') {
+    const extraction = await extractPDFText(content);
+    const stats = getTextStatistics(extraction);
+
+    return {
+      wordCount: stats.wordCount,
+      pageEstimated:
+        extraction.numpages > 0 ? extraction.numpages : Math.ceil(stats.wordCount / 250),
+      processingDuration: Date.now() - startTime,
+      processedAt: new Date(),
+      extractedText: extraction.text,
+      numpages: extraction.numpages,
+    };
+  }
+
+  // Other types are treated as UTF-8 text
+  const text = content.toString('utf-8');
+  const wordCount = text.split(/\s+/).filter((word) => word.length > 0).length;
+
+  const result: ProcessingResult = {
+    wordCount,
+    // Estimate pages (assuming ~250 words per page)
+    pageEstimated: Math.ceil(wordCount / 250),
+    processingDuration: Date.now() - startTime,
+    processedAt: new Date(),
+  };
+
+  // Only plain text can be read back as document text
+  if (mimetype === 'text/plain') {
+    result.extractedText = text;
+  }
+
+  return result;
 }
 
 /**

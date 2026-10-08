@@ -35,52 +35,6 @@ export interface CreateDocumentRequest {
   mimetype?: string;
 }
 
-export interface ValidationError {
-  error: string;
-  message: string;
-}
-
-/**
- * Validate document creation request
- */
-export function validateCreateRequest(data: unknown): ValidationError | null {
-  // Check if data is an object
-  if (typeof data !== 'object' || data === null) {
-    return {
-      error: 'Invalid Request',
-      message: 'Request body must be a JSON object',
-    };
-  }
-
-  const request = data as CreateDocumentRequest;
-
-  // Check if name field exists
-  if (!('name' in request)) {
-    return {
-      error: 'Validation Error',
-      message: 'Missing required field: name',
-    };
-  }
-
-  // Validate name is a string
-  if (typeof request.name !== 'string') {
-    return {
-      error: 'Validation Error',
-      message: 'Field "name" must be a string',
-    };
-  }
-
-  // Validate name is not empty
-  if (request.name.trim().length === 0) {
-    return {
-      error: 'Validation Error',
-      message: 'Field "name" cannot be empty',
-    };
-  }
-
-  return null;
-}
-
 /**
  * Document service class
  */
@@ -153,6 +107,13 @@ export class DocumentService {
     document.status = 'completed';
     document.processingResult = result;
     return true;
+  }
+
+  /**
+   * Delete a document by ID
+   */
+  deleteDocument(id: string): boolean {
+    return this.documents.delete(id);
   }
 
   /**

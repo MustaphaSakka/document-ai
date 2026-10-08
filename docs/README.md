@@ -92,6 +92,18 @@ Complete guide to the development process from setup to deployment.
 
 **When to read:** When starting development, encountering workflow issues, or improving development process.
 
+---
+
+### 🔌 [API Reference](api.md)
+HTTP endpoints currently exposed by the document service.
+
+**What you'll learn:**
+- Available endpoints, their parameters and responses
+- HTTP status codes returned by each endpoint
+- Current API limitations
+
+**When to read:** When calling the API from a client, or before adding new endpoints.
+
 ## Quick Reference Guides
 
 ### By Task

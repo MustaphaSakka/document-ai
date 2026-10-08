@@ -37,4 +37,7 @@ vi.mock('@aws-sdk/client-s3', () => ({
   GetObjectCommand: class {
     constructor(public input: any) {}
   },
+  DeleteObjectCommand: class {
+    constructor(public input: any) {}
+  },
 }));
