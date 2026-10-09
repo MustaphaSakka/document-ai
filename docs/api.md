@@ -95,20 +95,49 @@ Processing is not awaited: the response usually reports `pending`, but a fast do
 
 ## `GET /documents`
 
-List all documents.
+List documents, most recent first, one page at a time.
 
-- **Parameters**: none. The query string is ignored; there is no pagination, filtering or sorting option.
-- **Order**: most recent first.
+- **Parameters** (both optional):
+  - `page` — which page to return, 1-based. Default `1`.
+  - `limit` — how many documents per page. Default `20`, maximum `100`.
+- **Order**: `created_at` descending, then `id` descending. The second key is the tie-break that keeps
+  paging stable when two documents share a timestamp.
+- **Validation**: a parameter must be a plain run of digits. `page=0`, `limit=0`, `1.5`, `abc`, an
+  empty value, `1e2`, or the same parameter given twice are all `400` — never read as something else,
+  and never silently ignored. There is no filtering and no search.
 
-**200 OK**:
+**200 OK** — `GET /documents?page=1&limit=20`:
 
 ```json
-{ "documents": [], "total": 0 }
+{
+  "documents": [
+    {
+      "id": "doc_1770000000000_1",
+      "name": "report.pdf",
+      "status": "completed",
+      "createdAt": "2026-02-01T10:00:00.000Z",
+      "size": 2048,
+      "mimetype": "application/pdf"
+    }
+  ],
+  "total": 125,
+  "page": 1,
+  "limit": 20,
+  "totalPages": 7
+}
 ```
+
+Documents are [Document objects](#document-object). `total` counts every stored document, not the ones
+on this page, so it is the same on every page. `totalPages` is `ceil(total / limit)`, and `0` when
+nothing is stored at all.
 
 | Code | Reason |
 |---|---|
-| 200 | Always, including when there is no document |
+| 200 | Always — including an empty list, and a page past the last one |
+| 400 | `page` or `limit` is not an integer >= 1, is given twice, or `limit` is over 100 |
+
+A page past the last one is not an error: it returns `documents: []` with the real `total`, which is
+how a client discovers it has gone too far.
 
 ## `GET /documents/:id`
 
@@ -213,5 +242,5 @@ Liveness check.
 2. **Status reflects this API only.** The extraction Lambda writes its own
    `documents/{uuid}-extracted.json` to S3 and the API does not read it back, so processing done there
    is not visible through these endpoints.
-3. **None of these exist yet**: authentication, pagination, search, document update, processing
+3. **None of these exist yet**: authentication, search, document update, processing
    history across attempts.

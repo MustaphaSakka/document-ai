@@ -69,12 +69,12 @@ describe('Document Service', () => {
       expect(retrieved?.name).toBe(doc1.name);
     });
 
-    it('should return all documents', async () => {
+    it('should store every document it is given', async () => {
       await documentService.createDocument({ name: 'doc1.pdf' });
       await documentService.createDocument({ name: 'doc2.pdf' });
 
-      const allDocs = await documentService.getAllDocuments();
-      expect(allDocs).toHaveLength(2);
+      const page = await documentService.getDocuments({ page: 1, limit: 20 });
+      expect(page.total).toBe(2);
     });
 
     it('should leave the columns that were not provided empty', async () => {
@@ -122,18 +122,68 @@ describe('Document Service', () => {
     });
   });
 
-  describe('getAllDocuments', () => {
-    it('should return an empty array when there is no document', async () => {
-      expect(await documentService.getAllDocuments()).toEqual([]);
+  describe('getDocuments', () => {
+    it('should return an empty page when there is no document', async () => {
+      expect(await documentService.getDocuments({ page: 1, limit: 20 })).toEqual({
+        documents: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      });
     });
 
     it('should return the most recent document first', async () => {
       await documentService.createDocument({ name: 'first.pdf' });
       await documentService.createDocument({ name: 'second.pdf' });
 
-      const names = (await documentService.getAllDocuments()).map((doc) => doc.name);
+      const { documents } = await documentService.getDocuments({ page: 1, limit: 20 });
 
-      expect(names).toEqual(['second.pdf', 'first.pdf']);
+      expect(documents.map((doc) => doc.name)).toEqual(['second.pdf', 'first.pdf']);
+    });
+
+    it('should round the page count up', async () => {
+      await documentService.createDocument({ name: 'one.pdf' });
+      await documentService.createDocument({ name: 'two.pdf' });
+      await documentService.createDocument({ name: 'three.pdf' });
+
+      // Three documents of two per page need two pages, the second one short.
+      const page = await documentService.getDocuments({ page: 1, limit: 2 });
+
+      expect(page.totalPages).toBe(2);
+      expect(page.documents).toHaveLength(2);
+    });
+
+    it('should offset the page by the pages before it', async () => {
+      for (const name of ['one.pdf', 'two.pdf', 'three.pdf']) {
+        await documentService.createDocument({ name });
+      }
+
+      // Most recent first, so page 2 of two-per-page starts at the oldest.
+      const second = await documentService.getDocuments({ page: 2, limit: 2 });
+
+      expect(second.documents.map((doc) => doc.name)).toEqual(['one.pdf']);
+      expect(second.page).toBe(2);
+    });
+
+    it('should report the total number of documents on every page', async () => {
+      for (const name of ['one.pdf', 'two.pdf', 'three.pdf']) {
+        await documentService.createDocument({ name });
+      }
+
+      for (const page of [1, 2, 3]) {
+        expect((await documentService.getDocuments({ page, limit: 1 })).total).toBe(3);
+      }
+    });
+
+    it('should return an empty page past the end without losing the total', async () => {
+      await documentService.createDocument({ name: 'only.pdf' });
+
+      const page = await documentService.getDocuments({ page: 9, limit: 20 });
+
+      expect(page.documents).toEqual([]);
+      expect(page.total).toBe(1);
+      expect(page.totalPages).toBe(1);
     });
   });
 
@@ -240,10 +290,10 @@ describe('Document Service', () => {
       await documentService.createDocument({ name: 'doc1.pdf' });
       await documentService.createDocument({ name: 'doc2.pdf' });
 
-      expect(await documentService.getAllDocuments()).toHaveLength(2);
+      expect((await documentService.getDocuments({ page: 1, limit: 20 })).total).toBe(2);
 
       await documentService.clearDocuments();
-      expect(await documentService.getAllDocuments()).toHaveLength(0);
+      expect((await documentService.getDocuments({ page: 1, limit: 20 })).total).toBe(0);
     });
   });
 
@@ -253,7 +303,7 @@ describe('Document Service', () => {
 
       expect(await documentService.deleteDocument(document.id)).toBe(true);
       expect(await documentService.getDocument(document.id)).toBeUndefined();
-      expect(await documentService.getAllDocuments()).toHaveLength(0);
+      expect((await documentService.getDocuments({ page: 1, limit: 20 })).total).toBe(0);
     });
 
     it('should return false for an unknown document', async () => {

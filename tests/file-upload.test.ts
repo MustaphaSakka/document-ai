@@ -227,7 +227,7 @@ describe('File Upload Tests', () => {
       expect(putObjectCalls).toHaveLength(0);
 
       // And no document record may be created
-      expect(await documentService.getAllDocuments()).toHaveLength(0);
+      expect((await documentService.getDocuments({ page: 1, limit: 20 })).total).toBe(0);
     });
   });
 
@@ -367,8 +367,8 @@ describe('File Upload Tests', () => {
       }
 
       // Verify all documents were created
-      const allDocs = await documentService.getAllDocuments();
-      expect(allDocs).toHaveLength(3);
+      const page = await documentService.getDocuments({ page: 1, limit: 20 });
+      expect(page.total).toBe(3);
     });
   });
 

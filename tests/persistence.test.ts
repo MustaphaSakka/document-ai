@@ -47,9 +47,9 @@ describe('PostgreSQL persistence', () => {
   it('should list a document from an instance that never created it', async () => {
     const created = await documentService.createDocument({ name: 'durable.pdf' });
 
-    const fromOtherInstance = await otherService.getAllDocuments();
+    const fromOtherInstance = await otherService.getDocuments({ page: 1, limit: 20 });
 
-    expect(fromOtherInstance.map((document) => document.id)).toEqual([created.id]);
+    expect(fromOtherInstance.documents.map((document) => document.id)).toEqual([created.id]);
   });
 
   it('should expose a status written through another connection', async () => {

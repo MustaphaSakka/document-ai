@@ -39,6 +39,14 @@ interface DocumentStatusResponse {
   error?: string;
 }
 
+interface DocumentListResponse {
+  documents: DocumentResponse[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
 interface DocumentTextResponse {
   id: string;
   text: string;
@@ -50,6 +58,57 @@ interface BusboyFileObject {
   filename: string;
   encoding: string;
   mimeType: string;
+}
+
+/** Pagination defaults and ceiling, part of the HTTP contract. */
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+/** Either the value read from the query string, or why it was refused. */
+type ParsedInteger = { ok: true; value: number } | { ok: false; message: string };
+
+/**
+ * Read a positive integer query parameter.
+ *
+ * The check is on the text, not on `Number(...)`, because `Number` is happy to
+ * read things a client did not mean as a page number: `''` and `' '` are 0,
+ * `'0x10'` is 16, `'1e3'` is 1000. A parameter that is present but not a plain
+ * run of digits is refused rather than guessed at — silently reading `page=abc`
+ * as page 1 would hide a bug in the caller. `Number.isSafeInteger` is the second
+ * half: digits long enough to lose precision are not a page anyone can be on,
+ * and passing them to `OFFSET` would overflow what PostgreSQL accepts.
+ *
+ * An absent parameter takes its default; a repeated one is ambiguous and refused.
+ */
+function parsePositiveInteger(
+  searchParams: URLSearchParams,
+  name: string,
+  fallback: number,
+): ParsedInteger {
+  const values = searchParams.getAll(name);
+
+  if (values.length === 0) {
+    return { ok: true, value: fallback };
+  }
+
+  const message = `Query parameter '${name}' must be an integer >= 1`;
+
+  if (values.length > 1) {
+    return { ok: false, message: `Query parameter '${name}' must be given at most once` };
+  }
+
+  const raw = values[0] ?? '';
+  if (!/^\d+$/.test(raw)) {
+    return { ok: false, message };
+  }
+
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) {
+    return { ok: false, message };
+  }
+
+  return { ok: true, value };
 }
 
 /**
@@ -337,16 +396,48 @@ export function createDocument(request: IncomingMessage, response: ServerRespons
 }
 
 /**
- * GET /documents - list all documents, most recent first
+ * GET /documents - one page of documents, most recent first
+ *
+ * `?page=` and `?limit=` are optional. Their order in the URL carries no
+ * meaning, so they are read from the parsed query string rather than from a
+ * fixed position.
  */
 export async function listDocuments(
-  _request: IncomingMessage,
+  request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
-  // Already ordered by the query: created_at DESC, id DESC.
-  const documents = (await documentService.getAllDocuments()).map(toDocumentResponse);
+  // request.url is the raw path plus query string, e.g. "/documents?limit=10".
+  const { searchParams } = new URL(request.url ?? '/', 'http://localhost');
 
-  sendJson(response, 200, { documents, total: documents.length });
+  const page = parsePositiveInteger(searchParams, 'page', DEFAULT_PAGE);
+  if (!page.ok) {
+    sendError(response, 400, 'Bad Request', page.message);
+    return;
+  }
+
+  const limit = parsePositiveInteger(searchParams, 'limit', DEFAULT_LIMIT);
+  if (!limit.ok) {
+    sendError(response, 400, 'Bad Request', limit.message);
+    return;
+  }
+
+  if (limit.value > MAX_LIMIT) {
+    sendError(response, 400, 'Bad Request', `Query parameter 'limit' must not exceed ${MAX_LIMIT}`);
+    return;
+  }
+
+  // A page past the end is not an error: it is an empty page of a list that
+  // really does have that many items, and `total` still says how many.
+  const result = await documentService.getDocuments({ page: page.value, limit: limit.value });
+
+  const body: DocumentListResponse = {
+    documents: result.documents.map(toDocumentResponse),
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+    totalPages: result.totalPages,
+  };
+  sendJson(response, 200, body);
 }
 
 /**

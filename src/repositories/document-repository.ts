@@ -2,8 +2,8 @@
  * Everything that touches the `documents` table.
  *
  * The service above it holds the business rules; this holds the SQL. Each method
- * runs one parameterized statement and turns the row it gets back into a
- * `Document`, so no column name escapes this file. Statements that encode a rule
+ * runs its parameterized statements and turns the rows it gets back into
+ * `Document`s, so no column name escapes this file. Statements that encode a rule
  * — the COALESCE that preserves a previous error, the atomic status change in
  * `updateResult` — are deliberately left as they were: they are the behaviour,
  * not an implementation detail.
@@ -26,6 +26,19 @@ interface DocumentRow {
   processing_result: StoredProcessingResult | null;
   created_at: Date;
   updated_at: Date;
+}
+
+/**
+ * `COUNT(*)` as node-postgres returns it.
+ *
+ * The cast to `int` in the query is what makes this a number. PostgreSQL counts
+ * in `bigint`, and node-postgres refuses to parse `int8` — it hands it over as a
+ * string, because a JavaScript number cannot hold every 64-bit integer without
+ * loss. Without the cast, `total` would be `"125"` and `Math.ceil` would quietly
+ * turn it into a string of arithmetic nonsense.
+ */
+interface CountRow {
+  total: number;
 }
 
 /** ProcessingResult as it sits in JSONB, where processedAt is an ISO string. */
@@ -142,14 +155,33 @@ export class DocumentRepository {
   }
 
   /**
-   * Every document, most recent first.
+   * One page of documents, most recent first, and how many exist in total.
+   *
+   * The two statements run together rather than in sequence: they are
+   * independent, and node-postgres runs each on its own pooled connection, so
+   * awaiting both costs one round trip in wall-clock time instead of two.
+   *
+   * `COUNT(*) OVER ()` would have folded this into a single query, but it only
+   * counts the rows the query returns — a page past the end matches nothing, and
+   * the total would come back as zero exactly when the client is asking where
+   * the end is.
    */
-  async findAll(): Promise<Document[]> {
-    const { rows } = await this.pool.query<DocumentRow>(
-      'SELECT * FROM documents ORDER BY created_at DESC, id DESC',
-    );
+  async findPage(limit: number, offset: number): Promise<{ documents: Document[]; total: number }> {
+    const [page, count] = await Promise.all([
+      this.pool.query<DocumentRow>(
+        `SELECT *
+           FROM documents
+          ORDER BY created_at DESC, id DESC
+          LIMIT $1 OFFSET $2`,
+        [limit, offset],
+      ),
+      this.pool.query<CountRow>('SELECT COUNT(*)::int AS total FROM documents'),
+    ]);
 
-    return rows.map(rowToDocument);
+    return {
+      documents: page.rows.map(rowToDocument),
+      total: count.rows[0]?.total ?? 0,
+    };
   }
 
   /**

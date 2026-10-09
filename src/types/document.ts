@@ -37,3 +37,27 @@ export interface CreateDocumentRequest {
   size?: number;
   mimetype?: string;
 }
+
+/**
+ * Which slice of the list to read.
+ *
+ * `page` is 1-based, as a client counts pages. Both values are positive
+ * integers; the HTTP layer is what enforces that, since it is the only place a
+ * value can arrive from outside the program.
+ */
+export interface DocumentPageRequest {
+  page: number;
+  limit: number;
+}
+
+/**
+ * One page of documents, with the numbers the client needs to know where it is:
+ * `total` counts every stored document, not the ones on this page.
+ */
+export interface DocumentPage {
+  documents: Document[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}

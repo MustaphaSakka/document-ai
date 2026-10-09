@@ -38,6 +38,24 @@ async function seedCompletedDocument(name = 'report.pdf') {
   return document;
 }
 
+/**
+ * Create `count` documents with a distinct created_at each, one day apart, and
+ * return their names oldest first — the reverse of the order the API returns.
+ * Distinct timestamps are what make the pagination tests deterministic.
+ */
+async function seedOrderedDocuments(count: number): Promise<string[]> {
+  const names: string[] = [];
+
+  for (let index = 1; index <= count; index += 1) {
+    const name = `doc-${index}.pdf`;
+    const document = await documentService.createDocument({ name });
+    await setCreatedAt(document.id, new Date(Date.UTC(2026, 0, index)));
+    names.push(name);
+  }
+
+  return names;
+}
+
 /** Keys passed to DeleteObjectCommand, in call order */
 function deletedKeys(): string[] {
   return vi
@@ -68,15 +86,21 @@ describe('Document management endpoints', () => {
   });
 
   describe('GET /documents', () => {
-    it('should return an empty list', async () => {
+    it('should return an empty page with the default pagination', async () => {
       const response = await fetch(`${baseUrl}/documents`);
 
       expect(response.status).toBe(200);
       expect(response.headers.get('content-type')).toBe('application/json');
-      expect(await response.json()).toEqual({ documents: [], total: 0 });
+      expect(await response.json()).toEqual({
+        documents: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      });
     });
 
-    it('should return all documents, most recent first', async () => {
+    it('should return the most recent document first', async () => {
       // created_at belongs to the database now: the timestamps are written
       // there instead of onto the returned objects, which are only copies.
       const oldest = await documentService.createDocument({ name: 'oldest.txt' });
@@ -91,6 +115,9 @@ describe('Document management endpoints', () => {
       const data = await response.json();
 
       expect(data.total).toBe(3);
+      expect(data.page).toBe(1);
+      expect(data.limit).toBe(20);
+      expect(data.totalPages).toBe(1);
       expect(data.documents.map((document: { name: string }) => document.name)).toEqual([
         'newest.txt',
         'middle.txt',
@@ -98,11 +125,131 @@ describe('Document management endpoints', () => {
       ]);
     });
 
-    it('should ignore the query string', async () => {
-      const response = await fetch(`${baseUrl}/documents?limit=10`);
+    it('should break a tie on created_at with the id', async () => {
+      // Three documents sharing one timestamp: only the second sort key can
+      // decide. Ids increase with creation order, so descending id means the
+      // most recently created comes first.
+      const documents = await Promise.all(
+        ['first.txt', 'second.txt', 'third.txt'].map((name) =>
+          documentService.createDocument({ name }),
+        ),
+      );
+      for (const document of documents) {
+        await setCreatedAt(document.id, new Date('2026-04-01T00:00:00.000Z'));
+      }
+
+      const response = await fetch(`${baseUrl}/documents`);
+      const data = await response.json();
+
+      expect(data.documents.map((document: { name: string }) => document.name)).toEqual([
+        'third.txt',
+        'second.txt',
+        'first.txt',
+      ]);
+    });
+
+    it('should default page to 1 when only the limit is given', async () => {
+      await seedOrderedDocuments(3);
+
+      const response = await fetch(`${baseUrl}/documents?limit=5`);
+      const data = await response.json();
 
       expect(response.status).toBe(200);
-      expect((await response.json()).total).toBe(0);
+      expect(data.page).toBe(1);
+      expect(data.limit).toBe(5);
+      expect(data.totalPages).toBe(1);
+      expect(data.documents).toHaveLength(3);
+    });
+
+    it('should return the requested page', async () => {
+      const names = await seedOrderedDocuments(5);
+
+      const response = await fetch(`${baseUrl}/documents?page=2&limit=2`);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.page).toBe(2);
+      expect(data.limit).toBe(2);
+      // Page 2 starts after the two most recent, and stays most-recent-first
+      // within itself — `names` runs oldest first, hence the descending indexes.
+      expect(data.documents.map((document: { name: string }) => document.name)).toEqual([
+        names[2],
+        names[1],
+      ]);
+    });
+
+    it('should keep the total independent of the page', async () => {
+      await seedOrderedDocuments(5);
+
+      for (const page of [1, 2, 3]) {
+        const response = await fetch(`${baseUrl}/documents?page=${page}&limit=2`);
+        const data = await response.json();
+
+        expect(data.total).toBe(5);
+        expect(data.totalPages).toBe(3);
+      }
+    });
+
+    it('should return an empty page past the last one', async () => {
+      await seedOrderedDocuments(3);
+
+      const response = await fetch(`${baseUrl}/documents?page=99&limit=2`);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.documents).toEqual([]);
+      expect(data.page).toBe(99);
+      expect(data.total).toBe(3);
+      expect(data.totalPages).toBe(2);
+    });
+
+    it('should accept the maximum limit and refuse anything above it', async () => {
+      const accepted = await fetch(`${baseUrl}/documents?limit=100`);
+      expect(accepted.status).toBe(200);
+      expect((await accepted.json()).limit).toBe(100);
+
+      const refused = await fetch(`${baseUrl}/documents?limit=101`);
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toEqual({
+        error: 'Bad Request',
+        message: "Query parameter 'limit' must not exceed 100",
+      });
+    });
+
+    it.each(['0', '-1', 'abc', '1.5', '', '1e2', '0x10'])(
+      'should refuse page=%j',
+      async (value) => {
+        const response = await fetch(`${baseUrl}/documents?page=${encodeURIComponent(value)}`);
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: 'Bad Request',
+          message: "Query parameter 'page' must be an integer >= 1",
+        });
+      },
+    );
+
+    it.each(['0', '-1', 'abc', '1.5', ''])(
+      'should refuse limit=%j',
+      async (value) => {
+        const response = await fetch(`${baseUrl}/documents?limit=${encodeURIComponent(value)}`);
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: 'Bad Request',
+          message: "Query parameter 'limit' must be an integer >= 1",
+        });
+      },
+    );
+
+    it('should refuse a parameter given twice', async () => {
+      const response = await fetch(`${baseUrl}/documents?page=1&page=2`);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: 'Bad Request',
+        message: "Query parameter 'page' must be given at most once",
+      });
     });
 
     it('should not expose the extracted text', async () => {

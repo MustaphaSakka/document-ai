@@ -2,10 +2,10 @@
  * Document Service
  * Handles document storage and management
  *
- * Business rules only: the shape of an id, the normalisation of a name, and
- * where the extracted text of a PDF lives in S3. Every statement that touches
- * PostgreSQL belongs to `DocumentRepository`, so there is no SQL here and this
- * file knows no column name.
+ * Business rules only: the shape of an id, the normalisation of a name, which
+ * rows a page covers, and where the extracted text of a PDF lives in S3. Every
+ * statement that touches PostgreSQL belongs to `DocumentRepository`, so there is
+ * no SQL here and this file knows no column name.
  *
  * Records live in PostgreSQL; the file bytes stay in S3 (`s3Bucket` / `s3Key`).
  * Every method that reaches the database returns a Promise — unlike the Map this
@@ -14,11 +14,23 @@
 
 import { createId } from './utils.js';
 import { DocumentRepository } from './repositories/document-repository.js';
-import type { CreateDocumentRequest, Document, ProcessingResult } from './types/document.js';
+import type {
+  CreateDocumentRequest,
+  Document,
+  DocumentPage,
+  DocumentPageRequest,
+  ProcessingResult,
+} from './types/document.js';
 
 // Re-exported so that the modules already importing these types from this file
 // (the HTTP layer and the processor) keep working unchanged.
-export type { CreateDocumentRequest, Document, ProcessingResult };
+export type {
+  CreateDocumentRequest,
+  Document,
+  DocumentPage,
+  DocumentPageRequest,
+  ProcessingResult,
+};
 
 /**
  * Document service class
@@ -54,11 +66,28 @@ export class DocumentService {
   }
 
   /**
-   * Get all documents, most recent first
+   * One page of documents, most recent first.
+   *
+   * The arithmetic that turns a page number into a row range is business logic,
+   * so it lives here rather than in the SQL: the repository is handed the
+   * `LIMIT`/`OFFSET` pair it needs and knows nothing about pages. `limit` is
+   * assumed to be a positive integer — the HTTP layer validates it, since that
+   * is the only place the value can come from outside the program.
    */
-  async getAllDocuments(): Promise<Document[]> {
-    // Already ordered by the query: created_at DESC, id DESC.
-    return this.repository.findAll();
+  async getDocuments(request: DocumentPageRequest): Promise<DocumentPage> {
+    const { page, limit } = request;
+    const offset = (page - 1) * limit;
+
+    // `total` counts every stored document, so it stays the same on every page.
+    const { documents, total } = await this.repository.findPage(limit, offset);
+
+    return {
+      documents,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   /**
