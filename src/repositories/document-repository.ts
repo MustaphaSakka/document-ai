@@ -11,7 +11,12 @@
 
 import type { Pool } from 'pg';
 import { assertTestDatabase, databasePool } from '../db.js';
-import type { CreateDocumentRequest, Document, ProcessingResult } from '../types/document.js';
+import type {
+  CreateDocumentRequest,
+  Document,
+  DocumentFilters,
+  ProcessingResult,
+} from '../types/document.js';
 
 /** A `documents` row as node-postgres returns it. */
 interface DocumentRow {
@@ -155,7 +160,8 @@ export class DocumentRepository {
   }
 
   /**
-   * One page of documents, most recent first, and how many exist in total.
+   * One page of filtered documents, most recent first, and how many the filters
+   * match in total.
    *
    * The two statements run together rather than in sequence: they are
    * independent, and node-postgres runs each on its own pooled connection, so
@@ -164,18 +170,52 @@ export class DocumentRepository {
    * `COUNT(*) OVER ()` would have folded this into a single query, but it only
    * counts the rows the query returns — a page past the end matches nothing, and
    * the total would come back as zero exactly when the client is asking where
-   * the end is.
+   * the end is. The same WHERE clause is therefore handed to both statements, so
+   * the count always describes the list the page was cut from.
+   *
+   * With no filter the clause is empty and the statements are the ones this
+   * always ran. Otherwise the clause is built from the filters actually present;
+   * only the *index* of a placeholder is ever written into the SQL text, and
+   * every value the client sent travels as a bound parameter.
    */
-  async findPage(limit: number, offset: number): Promise<{ documents: Document[]; total: number }> {
+  async findPage(
+    limit: number,
+    offset: number,
+    filters: DocumentFilters = {},
+  ): Promise<{ documents: Document[]; total: number }> {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (filters.search) {
+      values.push(filters.search);
+      // The wildcards stay in the SQL rather than being wrapped around the value
+      // in JavaScript: what the user typed is then never part of a pattern by
+      // accident, and the value stays exactly what it was.
+      conditions.push(`name ILIKE '%' || $${values.length} || '%'`);
+    }
+
+    if (filters.status) {
+      values.push(filters.status);
+      conditions.push(`status = $${values.length}`);
+    }
+
+    if (filters.mimetype) {
+      values.push(filters.mimetype);
+      conditions.push(`mimetype = $${values.length}`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
     const [page, count] = await Promise.all([
       this.pool.query<DocumentRow>(
         `SELECT *
            FROM documents
+          ${where}
           ORDER BY created_at DESC, id DESC
-          LIMIT $1 OFFSET $2`,
-        [limit, offset],
+          LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, limit, offset],
       ),
-      this.pool.query<CountRow>('SELECT COUNT(*)::int AS total FROM documents'),
+      this.pool.query<CountRow>(`SELECT COUNT(*)::int AS total FROM documents ${where}`, values),
     ]);
 
     return {

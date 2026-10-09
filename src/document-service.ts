@@ -17,6 +17,7 @@ import { DocumentRepository } from './repositories/document-repository.js';
 import type {
   CreateDocumentRequest,
   Document,
+  DocumentFilters,
   DocumentPage,
   DocumentPageRequest,
   ProcessingResult,
@@ -27,6 +28,7 @@ import type {
 export type {
   CreateDocumentRequest,
   Document,
+  DocumentFilters,
   DocumentPage,
   DocumentPageRequest,
   ProcessingResult,
@@ -73,13 +75,20 @@ export class DocumentService {
    * `LIMIT`/`OFFSET` pair it needs and knows nothing about pages. `limit` is
    * assumed to be a positive integer — the HTTP layer validates it, since that
    * is the only place the value can come from outside the program.
+   *
+   * Filters narrow the list *before* the page is cut, so `total` and
+   * `totalPages` describe the filtered list: page 2 of "the completed invoices"
+   * is what a client asking for it means.
    */
   async getDocuments(request: DocumentPageRequest): Promise<DocumentPage> {
-    const { page, limit } = request;
+    const { page, limit, search, status, mimetype } = request;
     const offset = (page - 1) * limit;
 
-    // `total` counts every stored document, so it stays the same on every page.
-    const { documents, total } = await this.repository.findPage(limit, offset);
+    const { documents, total } = await this.repository.findPage(limit, offset, {
+      search,
+      status,
+      mimetype,
+    });
 
     return {
       documents,

@@ -128,6 +128,52 @@ h2 {
   max-width: 100%;
 }
 
+/* Filters */
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding: var(--space);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.filters__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.filters__field--search {
+  flex: 1 1 16rem;
+}
+
+.filters__label {
+  font-size: 0.875rem;
+  color: var(--color-muted);
+}
+
+.filters__input,
+.filters__select {
+  font: inherit;
+  max-width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+/* Wide enough for the longest label, so the select does not jump when it
+   changes. */
+.filters__select {
+  min-width: 11rem;
+}
+
 /* Buttons */
 
 .button {

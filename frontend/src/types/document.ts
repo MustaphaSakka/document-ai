@@ -28,8 +28,8 @@ export interface Document {
 /**
  * One page of documents, mirroring `DocumentPage` in the backend
  * (`src/types/document.ts`). `GET /documents` always answers a page, so these
- * five fields travel together: `total` counts every stored document, not the
- * ones on this page, and `totalPages` is `ceil(total / limit)`.
+ * five fields travel together: `total` counts every document the filters match,
+ * not the ones on this page, and `totalPages` is `ceil(total / limit)`.
  */
 export interface DocumentListResponse {
   documents: Document[];
@@ -37,6 +37,20 @@ export interface DocumentListResponse {
   page: number;
   limit: number;
   totalPages: number;
+}
+
+/**
+ * What `GET /documents` is asked for: the page, and the filters it is taken
+ * from. Mirrors `DocumentPageRequest` in the backend, except that the filters
+ * are optional here too — an absent one is not sent at all, rather than sent
+ * empty, which the backend refuses.
+ */
+export interface DocumentListParams {
+  page: number;
+  limit: number;
+  search?: string;
+  status?: DocumentStatus;
+  mimetype?: string;
 }
 
 export interface DocumentStatusResponse {

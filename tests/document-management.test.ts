@@ -41,19 +41,53 @@ async function seedCompletedDocument(name = 'report.pdf') {
 /**
  * Create `count` documents with a distinct created_at each, one day apart, and
  * return their names oldest first — the reverse of the order the API returns.
- * Distinct timestamps are what make the pagination tests deterministic.
+ * Distinct timestamps are what make the pagination tests deterministic. The
+ * prefix groups a set of documents under a shared name fragment, which is what
+ * the search filter is exercised against.
  */
-async function seedOrderedDocuments(count: number): Promise<string[]> {
+async function seedOrderedDocuments(count: number, prefix = 'doc'): Promise<string[]> {
   const names: string[] = [];
 
   for (let index = 1; index <= count; index += 1) {
-    const name = `doc-${index}.pdf`;
+    const name = `${prefix}-${index}.pdf`;
     const document = await documentService.createDocument({ name });
     await setCreatedAt(document.id, new Date(Date.UTC(2026, 0, index)));
     names.push(name);
   }
 
   return names;
+}
+
+/**
+ * Create one document already in the state a filter test needs. The mimetype is
+ * stored at creation; the status is moved afterwards, the way processing moves
+ * it, since a document is always born `pending`.
+ */
+async function seedDocument(
+  name: string,
+  status: 'pending' | 'processing' | 'completed' | 'failed',
+  mimetype: string,
+) {
+  const document = await documentService.createDocument({ name, mimetype });
+
+  if (status !== 'pending') {
+    await documentService.updateDocumentStatus(
+      document.id,
+      status,
+      status === 'failed' ? 'Extraction failed' : undefined,
+    );
+  }
+
+  return document;
+}
+
+/** Names of the documents a list query returns, in the order the API sorted them. */
+async function namesFrom(query: string): Promise<string[]> {
+  const response = await fetch(`${baseUrl}/documents${query}`);
+  const data = await response.json();
+
+  expect(response.status).toBe(200);
+  return data.documents.map((document: { name: string }) => document.name);
 }
 
 /** Keys passed to DeleteObjectCommand, in call order */
@@ -261,6 +295,198 @@ describe('Document management endpoints', () => {
       expect(data.documents[0].processingResult).toBeDefined();
       expect(data.documents[0].processingResult).not.toHaveProperty('extractedText');
       expect(data.documents[0]).not.toHaveProperty('extractedText');
+    });
+  });
+
+  describe('GET /documents with filters', () => {
+    /**
+     * Five documents covering every filter axis: two matching invoices, a failed
+     * contract, a completed text file and a PNG still processing. Newest first,
+     * the order the API returns them in, they are photo, notes, contrat,
+     * facture-fevrier, facture-janvier.
+     */
+    async function seedCatalogue(): Promise<void> {
+      await seedDocument('facture-janvier.pdf', 'completed', 'application/pdf');
+      await seedDocument('facture-fevrier.pdf', 'completed', 'application/pdf');
+      await seedDocument('contrat.pdf', 'failed', 'application/pdf');
+      await seedDocument('notes.txt', 'completed', 'text/plain');
+      await seedDocument('photo.png', 'processing', 'image/png');
+    }
+
+    it('should filter on a fragment of the name', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?search=facture')).toEqual([
+        'facture-fevrier.pdf',
+        'facture-janvier.pdf',
+      ]);
+    });
+
+    it('should match the name regardless of case', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?search=FACTURE')).toHaveLength(2);
+      expect(await namesFrom('?search=FaCtUrE')).toHaveLength(2);
+    });
+
+    it('should ignore whitespace around the search', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?search=%20facture%20')).toHaveLength(2);
+    });
+
+    it('should answer an empty page when the search matches nothing', async () => {
+      await seedCatalogue();
+
+      const response = await fetch(`${baseUrl}/documents?search=introuvable`);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.documents).toEqual([]);
+      expect(data.total).toBe(0);
+      expect(data.totalPages).toBe(0);
+    });
+
+    it('should filter on status=completed', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?status=completed')).toEqual([
+        'notes.txt',
+        'facture-fevrier.pdf',
+        'facture-janvier.pdf',
+      ]);
+    });
+
+    it('should filter on status=failed', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?status=failed')).toEqual(['contrat.pdf']);
+    });
+
+    it('should filter on the mime type', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?mimeType=application/pdf')).toEqual([
+        'contrat.pdf',
+        'facture-fevrier.pdf',
+        'facture-janvier.pdf',
+      ]);
+      expect(await namesFrom('?mimeType=text/plain')).toEqual(['notes.txt']);
+    });
+
+    it('should combine the search and the status', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?search=facture&status=completed')).toHaveLength(2);
+      expect(await namesFrom('?search=facture&status=failed')).toEqual([]);
+    });
+
+    it('should combine the three filters', async () => {
+      await seedCatalogue();
+
+      expect(await namesFrom('?search=facture&status=completed&mimeType=application/pdf')).toEqual([
+        'facture-fevrier.pdf',
+        'facture-janvier.pdf',
+      ]);
+
+      // Filters narrow together: one that matches nothing excludes the document
+      // the other two accept.
+      expect(await namesFrom('?search=facture&status=completed&mimeType=text/plain')).toEqual([]);
+    });
+
+    it('should count and paginate the filtered results, not the stored ones', async () => {
+      const names = await seedOrderedDocuments(5, 'facture');
+      // Excluded by the filter, so an unfiltered total would be 6.
+      await seedDocument('contrat.pdf', 'completed', 'application/pdf');
+
+      const first = await fetch(`${baseUrl}/documents?search=facture&page=1&limit=2`);
+      const firstPage = await first.json();
+
+      expect(firstPage.total).toBe(5);
+      expect(firstPage.totalPages).toBe(3);
+      expect(firstPage.documents.map((document: { name: string }) => document.name)).toEqual([
+        names[4],
+        names[3],
+      ]);
+
+      const second = await fetch(`${baseUrl}/documents?search=facture&page=2&limit=2`);
+      const secondPage = await second.json();
+
+      expect(secondPage.total).toBe(5);
+      expect(secondPage.documents.map((document: { name: string }) => document.name)).toEqual([
+        names[2],
+        names[1],
+      ]);
+    });
+
+    it('should return an empty page past the last filtered page', async () => {
+      await seedOrderedDocuments(3, 'facture');
+      await seedOrderedDocuments(4, 'contrat');
+
+      const response = await fetch(`${baseUrl}/documents?search=facture&page=9&limit=2`);
+      const data = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(data.documents).toEqual([]);
+      expect(data.page).toBe(9);
+      // Three matching documents out of the seven actually stored.
+      expect(data.total).toBe(3);
+      expect(data.totalPages).toBe(2);
+    });
+
+    it('should leave the unfiltered list untouched', async () => {
+      await seedCatalogue();
+
+      const response = await fetch(`${baseUrl}/documents`);
+      const data = await response.json();
+
+      expect(data.total).toBe(5);
+      expect(data.totalPages).toBe(1);
+      expect(data.documents).toHaveLength(5);
+    });
+
+    it.each(['unknown', 'PENDING', 'done', ''])(
+      'should refuse status=%j',
+      async (value) => {
+        const response = await fetch(`${baseUrl}/documents?status=${encodeURIComponent(value)}`);
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: 'Bad Request',
+          message:
+            "Query parameter 'status' must be one of: pending, processing, completed, failed",
+        });
+      },
+    );
+
+    it.each(['search', 'mimeType'])('should refuse an empty %s', async (name) => {
+      const response = await fetch(`${baseUrl}/documents?${name}=`);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: 'Bad Request',
+        message: `Query parameter '${name}' must not be empty`,
+      });
+    });
+
+    it('should refuse a search made only of spaces', async () => {
+      const response = await fetch(`${baseUrl}/documents?search=%20%20`);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: 'Bad Request',
+        message: "Query parameter 'search' must not be empty",
+      });
+    });
+
+    it.each(['search', 'mimeType', 'status'])('should refuse %s given twice', async (name) => {
+      const response = await fetch(`${baseUrl}/documents?${name}=a&${name}=b`);
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({
+        error: 'Bad Request',
+        message: `Query parameter '${name}' must be given at most once`,
+      });
     });
   });
 

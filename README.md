@@ -63,8 +63,11 @@ and no AI pipeline yet, because nothing yet needs them. Working this way:
 - **Text extraction** — PDF text in the background, with word count and page estimate
 - **Consultation** — the document list, a document's detail, and the extracted text over its own
   endpoint (`409` while processing is unfinished, `404` for types that have no text layer)
+- **Search and filters** — the list narrows by document name, status or MIME type, and pages over
+  the filtered result
 - **Deletion** — removes the S3 objects first, then the PostgreSQL row
-- **HTTP API** — endpoints for all of the above, with the list returned one page at a time
+- **HTTP API** — endpoints for all of the above, with the list returned one page at a time,
+  optionally filtered
 - **Web interface** — Vue 3: list, upload, detail, extracted text and delete, with live status
   updates that need no page reload
 
@@ -73,8 +76,6 @@ and no AI pipeline yet, because nothing yet needs them. Working this way:
 Directions under consideration, not features that exist. Anything here may change, and none of it
 is implemented today:
 
-- pagination and better frontend experience — the API paginates, the interface does not use it yet
-- search and filters
 - asynchronous processing of documents
 - deeper integration of the AWS services
 - authentication and user management
@@ -141,8 +142,8 @@ role). Everything else works without them.
 
 ```bash
 npm run db:up                           # the backend suite needs PostgreSQL
-npx vitest run                          # backend: 11 files, 152 tests
-cd frontend && npm run test:e2e         # frontend: 6 Cypress specs, 26 tests
+npx vitest run                          # backend: 11 files, 174 tests
+cd frontend && npm run test:e2e         # frontend: 7 Cypress specs, 36 tests
 ```
 
 The backend suite runs against the `document_ai_test` database, which `npm run db:up` creates

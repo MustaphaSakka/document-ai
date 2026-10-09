@@ -243,6 +243,11 @@ export class ApiError extends Error {
 
 - **Props down, events up.** A child never mutates what it receives. When it
   needs to change something, it emits and the parent decides.
+- **`defineModel()` for two-way bindings.** Rather than a prop plus an
+  `update:` event written out by hand, a component that edits a value declares
+  it once with `defineModel<string>('search', { required: true })` and the
+  parent binds `v-model:search`. It is the same prop-and-event pair underneath;
+  the compiler writes it. `DocumentFilters.vue` uses three of them.
 - **`props.` prefix in templates** when it reads more clearly, and always in
   `<script>`.
 - **Type maps must be exhaustive.** `Record<DocumentStatus, string>` in

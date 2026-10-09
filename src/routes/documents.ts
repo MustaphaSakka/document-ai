@@ -65,8 +65,32 @@ const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
+/**
+ * The only values `?status=` accepts.
+ *
+ * Typed as the domain union rather than as `string[]`, so adding a status to
+ * `Document` makes this list stop compiling until it is extended here too — the
+ * filter cannot silently drift away from the statuses the API can return.
+ */
+const DOCUMENT_STATUSES: readonly Document['status'][] = [
+  'pending',
+  'processing',
+  'completed',
+  'failed',
+];
+
+function isDocumentStatus(value: string): value is Document['status'] {
+  return DOCUMENT_STATUSES.some((status) => status === value);
+}
+
 /** Either the value read from the query string, or why it was refused. */
 type ParsedInteger = { ok: true; value: number } | { ok: false; message: string };
+
+/** The same, for a filter. `undefined` means the parameter was not given. */
+type ParsedText = { ok: true; value: string | undefined } | { ok: false; message: string };
+
+type ParsedStatus =
+  { ok: true; value: Document['status'] | undefined } | { ok: false; message: string };
 
 /**
  * Read a positive integer query parameter.
@@ -106,6 +130,66 @@ function parsePositiveInteger(
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value < 1) {
     return { ok: false, message };
+  }
+
+  return { ok: true, value };
+}
+
+/**
+ * Read an optional text filter, where an absent parameter means "no filter".
+ *
+ * Present but blank is refused rather than treated as absent. `?search=` is
+ * almost always a client building the query out of empty form fields, and
+ * quietly dropping the filter would answer with a list that does not match what
+ * the interface claims to be showing. A repeated parameter is ambiguous, and is
+ * refused for the same reason `page` and `limit` are.
+ *
+ * The value is trimmed, so trailing whitespace from a text field cannot turn a
+ * search that looks identical into one that matches nothing.
+ */
+function parseOptionalText(searchParams: URLSearchParams, name: string): ParsedText {
+  const values = searchParams.getAll(name);
+
+  if (values.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  if (values.length > 1) {
+    return { ok: false, message: `Query parameter '${name}' must be given at most once` };
+  }
+
+  const value = (values[0] ?? '').trim();
+  if (value === '') {
+    return { ok: false, message: `Query parameter '${name}' must not be empty` };
+  }
+
+  return { ok: true, value };
+}
+
+/**
+ * Read the optional `?status=` filter.
+ *
+ * The accepted values are exactly the statuses the domain knows about. Anything
+ * else is a typo or a client guessing, and is reported rather than read as "no
+ * filter" — which would answer with a list the caller did not ask for.
+ */
+function parseStatus(searchParams: URLSearchParams): ParsedStatus {
+  const values = searchParams.getAll('status');
+
+  if (values.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  if (values.length > 1) {
+    return { ok: false, message: "Query parameter 'status' must be given at most once" };
+  }
+
+  const value = values[0] ?? '';
+  if (!isDocumentStatus(value)) {
+    return {
+      ok: false,
+      message: `Query parameter 'status' must be one of: ${DOCUMENT_STATUSES.join(', ')}`,
+    };
   }
 
   return { ok: true, value };
@@ -398,9 +482,11 @@ export function createDocument(request: IncomingMessage, response: ServerRespons
 /**
  * GET /documents - one page of documents, most recent first
  *
- * `?page=` and `?limit=` are optional. Their order in the URL carries no
- * meaning, so they are read from the parsed query string rather than from a
- * fixed position.
+ * Every parameter is optional: `?page=`, `?limit=`, `?search=`, `?status=` and
+ * `?mimeType=`. Their order in the URL carries no meaning, so they are read
+ * from the parsed query string rather than from a fixed position. Each filter
+ * is validated before anything is read from the database, so an invalid one
+ * never costs a query.
  */
 export async function listDocuments(
   request: IncomingMessage,
@@ -426,9 +512,35 @@ export async function listDocuments(
     return;
   }
 
+  const search = parseOptionalText(searchParams, 'search');
+  if (!search.ok) {
+    sendError(response, 400, 'Bad Request', search.message);
+    return;
+  }
+
+  const status = parseStatus(searchParams);
+  if (!status.ok) {
+    sendError(response, 400, 'Bad Request', status.message);
+    return;
+  }
+
+  // The query parameter is spelled `mimeType`, the way a MIME type is written;
+  // the column and the domain object call it `mimetype`.
+  const mimeType = parseOptionalText(searchParams, 'mimeType');
+  if (!mimeType.ok) {
+    sendError(response, 400, 'Bad Request', mimeType.message);
+    return;
+  }
+
   // A page past the end is not an error: it is an empty page of a list that
   // really does have that many items, and `total` still says how many.
-  const result = await documentService.getDocuments({ page: page.value, limit: limit.value });
+  const result = await documentService.getDocuments({
+    page: page.value,
+    limit: limit.value,
+    search: search.value,
+    status: status.value,
+    mimetype: mimeType.value,
+  });
 
   const body: DocumentListResponse = {
     documents: result.documents.map(toDocumentResponse),

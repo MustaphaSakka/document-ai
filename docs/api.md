@@ -97,16 +97,23 @@ Processing is not awaited: the response usually reports `pending`, but a fast do
 
 List documents, most recent first, one page at a time.
 
-- **Parameters** (both optional):
+- **Parameters** (all optional):
   - `page` — which page to return, 1-based. Default `1`.
   - `limit` — how many documents per page. Default `20`, maximum `100`.
+  - `search` — case-insensitive substring of the document name, e.g. `invoice` matches
+    `invoice-2026.pdf`.
+  - `status` — one of `pending`, `processing`, `completed`, `failed`.
+  - `mimeType` — an exact content type, e.g. `application/pdf`.
 - **Order**: `created_at` descending, then `id` descending. The second key is the tie-break that keeps
   paging stable when two documents share a timestamp.
-- **Validation**: a parameter must be a plain run of digits. `page=0`, `limit=0`, `1.5`, `abc`, an
-  empty value, `1e2`, or the same parameter given twice are all `400` — never read as something else,
-  and never silently ignored. There is no filtering and no search.
+- **Filters** narrow the list *before* the page is cut, and combine with AND: `total` and `totalPages`
+  describe the filtered list, not everything stored.
+- **Validation**: `page` and `limit` must be a plain run of digits. `page=0`, `limit=0`, `1.5`, `abc`,
+  an empty value, `1e2`, or the same parameter given twice are all `400` — never read as something
+  else, and never silently ignored. A filter must not be blank when given, and `status` must be one of
+  the four values: `?status=done` is a `400`, not an unfiltered list.
 
-**200 OK** — `GET /documents?page=1&limit=20`:
+**200 OK** — `GET /documents?search=invoice&status=completed&page=1&limit=20`:
 
 ```json
 {
@@ -127,14 +134,14 @@ List documents, most recent first, one page at a time.
 }
 ```
 
-Documents are [Document objects](#document-object). `total` counts every stored document, not the ones
-on this page, so it is the same on every page. `totalPages` is `ceil(total / limit)`, and `0` when
-nothing is stored at all.
+Documents are [Document objects](#document-object). `total` counts every document the filters match,
+not the ones on this page, so it is the same on every page of the same query. `totalPages` is
+`ceil(total / limit)`, and `0` when nothing matches.
 
 | Code | Reason |
 |---|---|
 | 200 | Always — including an empty list, and a page past the last one |
-| 400 | `page` or `limit` is not an integer >= 1, is given twice, or `limit` is over 100 |
+| 400 | `page` or `limit` is not an integer >= 1, is given twice, or `limit` is over 100; a filter is blank or given twice; `status` is not one of the four values |
 
 A page past the last one is not an error: it returns `documents: []` with the real `total`, which is
 how a client discovers it has gone too far.
@@ -242,5 +249,7 @@ Liveness check.
 2. **Status reflects this API only.** The extraction Lambda writes its own
    `documents/{uuid}-extracted.json` to S3 and the API does not read it back, so processing done there
    is not visible through these endpoints.
-3. **None of these exist yet**: authentication, search, document update, processing
+3. **The search is a plain `ILIKE`.** No index and no full-text search, which is enough for the
+   volumes this API handles today. `%` and `_` in the search text are still wildcards.
+4. **None of these exist yet**: authentication, document update, processing
    history across attempts.

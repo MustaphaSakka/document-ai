@@ -3,6 +3,7 @@
 import { requestJson, requestNoContent } from './client';
 import type {
   Document,
+  DocumentListParams,
   DocumentListResponse,
   DocumentStatusResponse,
   DocumentTextResponse,
@@ -22,14 +23,33 @@ function documentPath(id: string): string {
 }
 
 /**
- * One page of documents. `page` is 1-based, as the user counts pages.
+ * One page of documents, optionally restricted by filters. `page` is 1-based,
+ * as the user counts pages.
  *
  * `URLSearchParams` builds the query rather than string concatenation: it
  * encodes the values for the URL, so a caller cannot produce a malformed query
  * by passing something unexpected.
+ *
+ * A filter that is not set is left out entirely. The backend reads a blank
+ * parameter as a mistake rather than as "no filter", so the absence of the key
+ * is the only correct way to say "do not filter on this".
  */
-export function listDocuments(page: number, limit: number): Promise<DocumentListResponse> {
-  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+export function listDocuments(params: DocumentListParams): Promise<DocumentListResponse> {
+  const query = new URLSearchParams({ page: String(params.page), limit: String(params.limit) });
+
+  if (params.search) {
+    query.set('search', params.search);
+  }
+
+  if (params.status) {
+    query.set('status', params.status);
+  }
+
+  if (params.mimetype) {
+    // The one place the URL spelling lives: the query parameter is `mimeType`,
+    // while the rest of the code follows the `mimetype` of a `Document`.
+    query.set('mimeType', params.mimetype);
+  }
 
   return requestJson<DocumentListResponse>(`${DOCUMENTS_PATH}?${query.toString()}`);
 }
