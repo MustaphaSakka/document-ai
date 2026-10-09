@@ -5,8 +5,8 @@ the frontend suite runs without a backend and without a database.
 
 | Suite | Tool | Location | Run from | Size | Needs |
 |---|---|---|---|---|---|
-| Backend unit and integration | Vitest | `tests/` | repository root | 11 files, 130 tests | PostgreSQL |
-| Frontend end-to-end | Cypress | `frontend/cypress/e2e/` | `frontend/` | 5 specs, 18 tests | — |
+| Backend unit and integration | Vitest | `tests/` | repository root | 11 files, 152 tests | PostgreSQL |
+| Frontend end-to-end | Cypress | `frontend/cypress/e2e/` | `frontend/` | 6 specs, 26 tests | — |
 
 ## Backend (Vitest)
 
@@ -85,8 +85,8 @@ npm run cypress:open  # interactive runner
 npm run cypress:run   # headless, against an already-running server
 ```
 
-One spec per feature: `documents-list`, `document-upload`, `document-detail`, `document-text`,
-`document-delete`.
+One spec per feature: `documents-list`, `document-pagination`, `document-upload`,
+`document-detail`, `document-text`, `document-delete`.
 
 Every spec stubs the API with `cy.intercept` and fixtures from `cypress/fixtures/`. The suite
 therefore never needs the backend, and it can produce states a real backend rarely reaches on

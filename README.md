@@ -142,7 +142,7 @@ role). Everything else works without them.
 ```bash
 npm run db:up                           # the backend suite needs PostgreSQL
 npx vitest run                          # backend: 11 files, 152 tests
-cd frontend && npm run test:e2e         # frontend: 5 Cypress specs, 18 tests
+cd frontend && npm run test:e2e         # frontend: 6 Cypress specs, 26 tests
 ```
 
 The backend suite runs against the `document_ai_test` database, which `npm run db:up` creates

@@ -4,11 +4,13 @@ import { deleteDocument } from '../api/documents';
 import AppAlert from '../components/AppAlert.vue';
 import DocumentTable from '../components/DocumentTable.vue';
 import DocumentUpload from '../components/DocumentUpload.vue';
+import PaginationControls from '../components/PaginationControls.vue';
 import { useDocuments } from '../composables/useDocuments';
 import type { Document } from '../types/document';
 import { getErrorMessage } from '../utils/errors';
 
-const { documents, isLoading, error, load } = useDocuments();
+const { documents, currentPage, total, totalPages, isLoading, error, load, goToPage } =
+  useDocuments();
 
 const deleteError = ref<string | null>(null);
 const deletingId = ref<string | null>(null);
@@ -62,6 +64,15 @@ onMounted(() => {
       Aucun document pour le moment. Envoyez un fichier pour commencer.
     </p>
 
-    <DocumentTable v-else :documents="documents" :deleting-id="deletingId" @remove="handleRemove" />
+    <template v-else>
+      <DocumentTable :documents="documents" :deleting-id="deletingId" @remove="handleRemove" />
+
+      <PaginationControls
+        :page="currentPage"
+        :total-pages="totalPages"
+        :total="total"
+        @change="goToPage"
+      />
+    </template>
   </section>
 </template>

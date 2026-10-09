@@ -1,10 +1,12 @@
+import { DOCUMENTS_LIST_URL } from '../support/routes';
+
 /**
  * The list view, driven entirely by stubbed responses: these tests describe the
  * UI states (loading, error, empty, filled) and never depend on the backend.
  */
 describe('Liste des documents', () => {
   it('affiche les documents renvoyes par l API', () => {
-    cy.intercept('GET', '/api/documents', { fixture: 'documents.json' }).as('listDocuments');
+    cy.intercept('GET', DOCUMENTS_LIST_URL, { fixture: 'documents.json' }).as('listDocuments');
 
     cy.visit('/documents');
     cy.wait('@listDocuments');
@@ -20,21 +22,25 @@ describe('Liste des documents', () => {
   });
 
   it('affiche un message quand la liste est vide', () => {
-    cy.intercept('GET', '/api/documents', { body: { documents: [], total: 0 } }).as(
-      'listDocuments',
-    );
+    cy.intercept('GET', DOCUMENTS_LIST_URL, {
+      body: { documents: [], total: 0, page: 1, limit: 20, totalPages: 0 },
+    }).as('listDocuments');
 
     cy.visit('/documents');
     cy.wait('@listDocuments');
 
     cy.contains('Aucun document pour le moment');
     cy.get('table').should('not.exist');
+
+    // Nothing stored: the pagination has no page to offer and no count to show.
+    cy.contains('button', 'Suivant').should('not.exist');
+    cy.get('nav[aria-label="Pagination"]').should('not.exist');
   });
 
   it('affiche une erreur puis permet de reessayer', () => {
     let callCount = 0;
 
-    cy.intercept('GET', '/api/documents', (request) => {
+    cy.intercept('GET', DOCUMENTS_LIST_URL, (request) => {
       callCount += 1;
 
       if (callCount === 1) {
@@ -74,13 +80,15 @@ describe('Liste des documents', () => {
 
     let callCount = 0;
 
-    cy.intercept('GET', '/api/documents', (request) => {
+    cy.intercept('GET', DOCUMENTS_LIST_URL, (request) => {
       callCount += 1;
 
       // The first responses keep it processing so the intermediate state is
       // observable; the next one is what the backend would return later.
       const documents = callCount <= 2 ? [processingDocument] : [completedDocument];
-      request.reply({ body: { documents, total: documents.length } });
+      request.reply({
+        body: { documents, total: documents.length, page: 1, limit: 20, totalPages: 1 },
+      });
     }).as('listDocuments');
 
     cy.visit('/documents');
@@ -99,8 +107,8 @@ describe('Liste des documents', () => {
       mimetype: 'application/pdf',
     };
 
-    cy.intercept('GET', '/api/documents', {
-      body: { documents: [completedDocument], total: 1 },
+    cy.intercept('GET', DOCUMENTS_LIST_URL, {
+      body: { documents: [completedDocument], total: 1, page: 1, limit: 20, totalPages: 1 },
     }).as('listDocuments');
 
     cy.visit('/documents');

@@ -1,8 +1,10 @@
+import { DOCUMENTS_LIST_URL } from '../support/routes';
+
 const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024;
 
 describe('Upload d un document', () => {
   it('envoie le fichier puis rafraichit la liste', () => {
-    cy.intercept('GET', '/api/documents', { fixture: 'documents.json' }).as('listDocuments');
+    cy.intercept('GET', DOCUMENTS_LIST_URL, { fixture: 'documents.json' }).as('listDocuments');
     cy.intercept('POST', '/api/documents', {
       statusCode: 201,
       body: {
@@ -47,7 +49,7 @@ describe('Upload d un document', () => {
 
     let callCount = 0;
 
-    cy.intercept('GET', '/api/documents', (request) => {
+    cy.intercept('GET', DOCUMENTS_LIST_URL, (request) => {
       callCount += 1;
 
       // Empty to start with, then the uploaded document while it is still
@@ -55,7 +57,9 @@ describe('Upload d un document', () => {
       const documents =
         callCount === 1 ? [] : [callCount < 4 ? pendingDocument : completedDocument];
 
-      request.reply({ body: { documents, total: documents.length } });
+      request.reply({
+        body: { documents, total: documents.length, page: 1, limit: 20, totalPages: 1 },
+      });
     }).as('listDocuments');
 
     cy.intercept('POST', '/api/documents', {
@@ -91,8 +95,8 @@ describe('Upload d un document', () => {
       mimetype: 'application/pdf',
     };
 
-    cy.intercept('GET', '/api/documents', {
-      body: { documents: [completedDocument], total: 1 },
+    cy.intercept('GET', DOCUMENTS_LIST_URL, {
+      body: { documents: [completedDocument], total: 1, page: 1, limit: 20, totalPages: 1 },
     }).as('listDocuments');
     cy.intercept('POST', '/api/documents', { statusCode: 500 }).as('uploadDocument');
 

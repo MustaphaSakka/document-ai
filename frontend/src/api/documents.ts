@@ -21,8 +21,17 @@ function documentPath(id: string): string {
   return `${DOCUMENTS_PATH}/${encodeURIComponent(id)}`;
 }
 
-export function listDocuments(): Promise<DocumentListResponse> {
-  return requestJson<DocumentListResponse>(DOCUMENTS_PATH);
+/**
+ * One page of documents. `page` is 1-based, as the user counts pages.
+ *
+ * `URLSearchParams` builds the query rather than string concatenation: it
+ * encodes the values for the URL, so a caller cannot produce a malformed query
+ * by passing something unexpected.
+ */
+export function listDocuments(page: number, limit: number): Promise<DocumentListResponse> {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) });
+
+  return requestJson<DocumentListResponse>(`${DOCUMENTS_PATH}?${query.toString()}`);
 }
 
 export function getDocument(id: string): Promise<Document> {

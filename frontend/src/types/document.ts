@@ -25,9 +25,18 @@ export interface Document {
   error?: string;
 }
 
+/**
+ * One page of documents, mirroring `DocumentPage` in the backend
+ * (`src/types/document.ts`). `GET /documents` always answers a page, so these
+ * five fields travel together: `total` counts every stored document, not the
+ * ones on this page, and `totalPages` is `ceil(total / limit)`.
+ */
 export interface DocumentListResponse {
   documents: Document[];
   total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 export interface DocumentStatusResponse {

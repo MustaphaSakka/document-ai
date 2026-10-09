@@ -1,3 +1,5 @@
+import { DOCUMENTS_LIST_URL } from '../support/routes';
+
 describe('Detail d un document', () => {
   it('affiche les informations du document', () => {
     cy.intercept('GET', '/api/documents/doc_001', { fixture: 'document.json' });
@@ -26,7 +28,7 @@ describe('Detail d un document', () => {
   });
 
   it('revient a la liste depuis le detail', () => {
-    cy.intercept('GET', '/api/documents', { fixture: 'documents.json' }).as('listDocuments');
+    cy.intercept('GET', DOCUMENTS_LIST_URL, { fixture: 'documents.json' }).as('listDocuments');
     cy.intercept('GET', '/api/documents/doc_001', { fixture: 'document.json' });
     cy.intercept('GET', '/api/documents/doc_001/text', { fixture: 'document-text.json' });
 

@@ -314,7 +314,9 @@ Names describe intent, not implementation: `load()`, not `fetchAndSetData()`.
   backend stopped. Intercepts point at the real URL the app uses, `/api/...`:
 
   ```ts
-  cy.intercept('GET', '/api/documents', { fixture: 'documents.json' }).as('listDocuments');
+  import { DOCUMENTS_LIST_URL } from '../support/routes';
+
+  cy.intercept('GET', DOCUMENTS_LIST_URL, { fixture: 'documents.json' }).as('listDocuments');
 
   cy.visit('/documents');
   cy.wait('@listDocuments');
@@ -324,12 +326,18 @@ Names describe intent, not implementation: `load()`, not `fetchAndSetData()`.
   **API path** (`/api/documents`). Mixing them up is the most common mistake in
   this suite.
 
+  A string pattern is matched against the whole URL, query string included, so
+  `'/api/documents'` stops matching the list as soon as the app asks for a page:
+  the call is now `/api/documents?page=1&limit=20`. The shared pattern in
+  `cypress/support/routes.ts` matches the list with or without a query, and
+  leaves the detail routes (`/api/documents/:id`) alone.
+
 - **Fixtures for stable payloads** (`cypress/fixtures/*.json`), inline objects
   when a value must change mid-test:
 
   ```ts
   let callCount = 0;
-  cy.intercept('GET', '/api/documents', (request) => {
+  cy.intercept('GET', DOCUMENTS_LIST_URL, (request) => {
     callCount += 1;
     request.reply(callCount === 1 ? { statusCode: 500, body: { message: 'Serveur indisponible' } } : { fixture: 'documents.json' });
   });
