@@ -1,20 +1,85 @@
 # Document AI
 
-A document processing application built with Node.js and TypeScript, with a Vue 3 frontend.
-File bytes are stored in Amazon S3 and the document metadata in PostgreSQL; text is extracted
-in the background and served over a small HTTP API.
+A document management and processing platform built with Node.js and TypeScript, with a Vue 3
+frontend. File bytes are stored in Amazon S3 and the document metadata in PostgreSQL; text is
+extracted in the background and served over a small HTTP API.
 
-## Features
+## What the application is for
 
-- **Upload** a document (PDF, Word, JPEG, PNG or plain text, max 5 MB), streamed to Amazon S3
-- **Text extraction** for PDFs, with word count and page estimate
-- **Durable metadata** in PostgreSQL: documents and their status survive a restart of the API
-- **Document list** with name, status, date and size
-- **Status tracking**: `pending` → `processing` → `completed` / `failed`
-- **Extracted text** endpoint, distinct from the 409 returned while processing is unfinished
-- **Deletion**, which removes the S3 objects and then the PostgreSQL row
-- **Web interface** covering all of it: list, upload, detail, extracted text, delete, and live
-  status updates that need no page reload
+The project covers the life of a document, from the moment it is deposited to the moment its
+content can be used:
+
+```
+User
+  │
+  ▼
+Upload a document
+  │
+  ▼
+Storage — the bytes in S3, the metadata in PostgreSQL
+  │
+  ▼
+Processing status — pending → processing → completed / failed
+  │
+  ▼
+Text extraction — the content of the document
+  │
+  ▼
+Consultation — the list, the detail, the extracted text
+  │
+  ▼
+Later — analysis and enrichment by AI
+```
+
+The value is in centralising documents, following their processing, extracting their content and
+preparing that content for automated exploitation, instead of leaving files in mailboxes and
+shared folders.
+
+That makes the platform a possible base for invoices, contracts, receipts or administrative
+documents. Those are use cases it can support, not features it specialises in today: it accepts,
+stores, tracks and extracts text from any document of the types listed below.
+
+## MVP approach
+
+The project is developed as an MVP, one step at a time: each step adds a capability that can
+actually be used, while the technical base stays simple and evolvable. The goal is to validate
+functional needs and technical choices progressively, before introducing more complexity.
+
+The target architecture is deliberately not built up front. There is no job queue, no event bus
+and no AI pipeline yet, because nothing yet needs them. Working this way:
+
+- validates each capability on a running application rather than on a design;
+- keeps premature complexity out of the codebase;
+- leaves every step testable, with the Vitest and Cypress suites covering what exists;
+- lets the architecture grow with the needs instead of ahead of them;
+- defers the AWS and AI components until a real need for them appears.
+
+### Available today
+
+- **Upload** — PDF, Word, JPEG, PNG or plain text, max 5 MB, streamed to Amazon S3
+- **Storage** — the file bytes in S3 and the metadata in PostgreSQL, so a document and its status
+  survive a restart of the API
+- **Status tracking** — `pending` → `processing` → `completed` / `failed`
+- **Text extraction** — PDF text in the background, with word count and page estimate
+- **Consultation** — the document list, a document's detail, and the extracted text over its own
+  endpoint (`409` while processing is unfinished, `404` for types that have no text layer)
+- **Deletion** — removes the S3 objects first, then the PostgreSQL row
+- **HTTP API** — endpoints for all of the above, with the list returned one page at a time
+- **Web interface** — Vue 3: list, upload, detail, extracted text and delete, with live status
+  updates that need no page reload
+
+### Roadmap
+
+Directions under consideration, not features that exist. Anything here may change, and none of it
+is implemented today:
+
+- pagination and better frontend experience — the API paginates, the interface does not use it yet
+- search and filters
+- asynchronous processing of documents
+- deeper integration of the AWS services
+- authentication and user management
+- analysis and enrichment of documents by AI
+- semantic search / RAG
 
 ## Architecture at a glance
 
@@ -34,6 +99,18 @@ The client polls GET /documents/:id/status until processing finishes.
 ```
 
 Details, layers and file layout: [docs/architecture.md](docs/architecture.md).
+
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Language and runtime | Node.js, TypeScript (strict, ESM) |
+| HTTP | Node's built-in `http` module — no framework |
+| Storage | Amazon S3 for the file bytes, PostgreSQL for the metadata |
+| Uploads and PDF parsing | `busboy`, `pdf2json` |
+| Frontend | Vue 3 + Vite + TypeScript |
+| Tests | Vitest (backend), Cypress (frontend, end-to-end) |
+| Local infrastructure | Docker Compose, for PostgreSQL |
 
 ## Quick start
 
@@ -64,7 +141,7 @@ role). Everything else works without them.
 
 ```bash
 npm run db:up                           # the backend suite needs PostgreSQL
-npx vitest run                          # backend: 11 files, 130 tests
+npx vitest run                          # backend: 11 files, 152 tests
 cd frontend && npm run test:e2e         # frontend: 5 Cypress specs, 18 tests
 ```
 
