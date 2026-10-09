@@ -32,7 +32,11 @@ src/
 │   └── documents.ts              one handler per endpoint
 ├── db.ts                         shared pg Pool; the guard on destructive statements
 ├── migrate.ts                    applies db/migrations/*.sql (`npm run migrate`)
-├── document-service.ts           document records in PostgreSQL, status transitions
+├── types/
+│   └── document.ts               the domain types, shared across the backend
+├── repositories/
+│   └── document-repository.ts    every SQL statement that touches `documents`
+├── document-service.ts           business rules and status transitions
 ├── processor.ts                  background processing of an uploaded document
 ├── extractors/
 │   └── pdf-text-extractor.ts     pdf2json wrapper, text statistics
@@ -50,7 +54,8 @@ built with `tsconfig.lambda.json` and deployed to AWS. The API's own processing 
 The schema itself is outside `src/`: `db/migrations/` holds the `.sql` files, `db/initdb/` the
 script that creates the test database when the container's volume is first initialised, and
 `docker-compose.yml` the container that runs both locally. `src/db.ts` holds the connection pool
-every query goes through; `src/migrate.ts` is the runner ([development.md](development.md#database)).
+every query goes through; `src/repositories/document-repository.ts` is the only file under `src/`
+that writes SQL; `src/migrate.ts` is the runner ([development.md](development.md#database)).
 
 ### Layers
 
@@ -63,14 +68,20 @@ server.ts               route table: matches method + number of path segments
    ▼
 routes/documents.ts     HTTP concerns only: parse, validate, pick a status code
    │
-   ├──► document-service.ts    document state in PostgreSQL; knows nothing about HTTP or S3
-   │      └──► db.ts           the connection pool
+   ├──► document-service.ts    business rules; knows nothing about HTTP, SQL or S3
+   │      └──► document-repository.ts   the SQL; knows nothing about HTTP
+   │             └──► db.ts             the connection pool
    └──► s3-file-handler.ts     S3 concerns; knows nothing about HTTP
 ```
 
-Handlers translate between HTTP and those two collaborators. Business state lives in
-`DocumentService`; infrastructure is behind `db.ts`, `s3-client.ts` and `s3-file-handler.ts`; and
-`server.ts` knows nothing about documents.
+Handlers translate between HTTP and those two collaborators. Business rules live in
+`DocumentService`, the SQL in `DocumentRepository`, infrastructure behind `db.ts`, `s3-client.ts`
+and `s3-file-handler.ts`; and `server.ts` knows nothing about documents.
+
+The split between the service and the repository is the point: the service decides *what* should
+happen (an id is generated, a name is trimmed, a status change to `completed` accompanies a
+result) and the repository decides *how it is stored*. Swapping PostgreSQL for something else
+would mean writing one new repository, not touching the service or the routes.
 
 Routes are matched on the HTTP method **and the exact number of path segments**
 (`src/server.ts`). That is what keeps `/documents/:id` from swallowing

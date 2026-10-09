@@ -2,179 +2,63 @@
  * Document Service
  * Handles document storage and management
  *
+ * Business rules only: the shape of an id, the normalisation of a name, and
+ * where the extracted text of a PDF lives in S3. Every statement that touches
+ * PostgreSQL belongs to `DocumentRepository`, so there is no SQL here and this
+ * file knows no column name.
+ *
  * Records live in PostgreSQL; the file bytes stay in S3 (`s3Bucket` / `s3Key`).
- * Every method that touches the database returns a Promise — unlike the Map this
+ * Every method that reaches the database returns a Promise — unlike the Map this
  * replaces, there is no longer a synchronous read.
  */
 
-import type { Pool } from 'pg';
-import { assertTestDatabase, databasePool } from './db.js';
 import { createId } from './utils.js';
+import { DocumentRepository } from './repositories/document-repository.js';
+import type { CreateDocumentRequest, Document, ProcessingResult } from './types/document.js';
 
-export interface Document {
-  id: string;
-  name: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  createdAt: Date;
-  s3Bucket?: string;
-  s3Key?: string;
-  size?: number;
-  mimetype?: string;
-  processingResult?: ProcessingResult;
-  error?: string;
-}
-
-export interface ProcessingResult {
-  wordCount: number;
-  pageEstimated: number;
-  processingDuration: number; // in milliseconds
-  processedAt: Date;
-  extractedText?: string;
-  numpages?: number;
-}
-
-export interface CreateDocumentRequest {
-  name: string;
-  s3Bucket?: string;
-  s3Key?: string;
-  size?: number;
-  mimetype?: string;
-}
-
-/** A `documents` row as node-postgres returns it. */
-interface DocumentRow {
-  id: string;
-  name: string;
-  status: Document['status'];
-  s3_bucket: string | null;
-  s3_key: string | null;
-  size: number | null;
-  mimetype: string | null;
-  error: string | null;
-  processing_result: StoredProcessingResult | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
-/** ProcessingResult as it sits in JSONB, where processedAt is an ISO string. */
-interface StoredProcessingResult {
-  wordCount: number;
-  pageEstimated: number;
-  processingDuration: number;
-  processedAt: string;
-  extractedText?: string;
-  numpages?: number;
-}
-
-/**
- * Turn a row into the business object.
- *
- * Two conversions are deliberate. The database says "no value" with NULL while
- * the business object says it with an absent property, so every nullable column
- * becomes undefined — without that, a response would carry `"size": null`
- * instead of omitting the key, which the client's `size?: number` does not
- * expect. And `processedAt` is a Date here but an ISO string in JSONB, so it is
- * parsed back.
- */
-function rowToDocument(row: DocumentRow): Document {
-  const document: Document = {
-    id: row.id,
-    name: row.name,
-    status: row.status,
-    createdAt: row.created_at,
-    s3Bucket: row.s3_bucket ?? undefined,
-    s3Key: row.s3_key ?? undefined,
-    size: row.size ?? undefined,
-    mimetype: row.mimetype ?? undefined,
-    error: row.error ?? undefined,
-  };
-
-  if (row.processing_result) {
-    const stored = row.processing_result;
-    document.processingResult = {
-      wordCount: stored.wordCount,
-      pageEstimated: stored.pageEstimated,
-      processingDuration: stored.processingDuration,
-      processedAt: new Date(stored.processedAt),
-      extractedText: stored.extractedText,
-      numpages: stored.numpages,
-    };
-  }
-
-  return document;
-}
-
-/** The mirror of the conversion above, on the way into JSONB. */
-function toStoredProcessingResult(result: ProcessingResult): StoredProcessingResult {
-  return {
-    wordCount: result.wordCount,
-    pageEstimated: result.pageEstimated,
-    processingDuration: result.processingDuration,
-    processedAt: result.processedAt.toISOString(),
-    extractedText: result.extractedText,
-    numpages: result.numpages,
-  };
-}
+// Re-exported so that the modules already importing these types from this file
+// (the HTTP layer and the processor) keep working unchanged.
+export type { CreateDocumentRequest, Document, ProcessingResult };
 
 /**
  * Document service class
  */
 export class DocumentService {
   /**
-   * The pool defaults to the shared one. Passing a different pool is what lets a
-   * test read the same rows through an independent set of connections, which is
-   * how "the data really is in the database" gets proved.
+   * The repository defaults to one backed by the shared pool. Passing a
+   * different one is what lets a test read the same rows through an independent
+   * set of connections, which is how "the data really is in the database" gets
+   * proved.
    */
-  constructor(private readonly pool: Pool = databasePool) {}
+  constructor(private readonly repository: DocumentRepository = new DocumentRepository()) {}
 
   /**
    * Create a new document
    */
   async createDocument(request: CreateDocumentRequest): Promise<Document> {
-    // RETURNING * so the timestamps in the result are the ones the database
-    // actually stored, not values guessed on this side.
-    const { rows } = await this.pool.query<DocumentRow>(
-      `INSERT INTO documents (id, name, status, s3_bucket, s3_key, size, mimetype)
-       VALUES ($1, $2, 'pending', $3, $4, $5, $6)
-       RETURNING *`,
-      [
-        createId(),
-        request.name.trim(),
-        request.s3Bucket ?? null,
-        request.s3Key ?? null,
-        request.size ?? null,
-        request.mimetype ?? null,
-      ],
-    );
-
-    const row = rows[0];
-    if (!row) {
-      throw new Error('The database did not return the inserted document');
-    }
-    return rowToDocument(row);
+    return this.repository.create({
+      id: createId(),
+      name: request.name.trim(),
+      s3Bucket: request.s3Bucket,
+      s3Key: request.s3Key,
+      size: request.size,
+      mimetype: request.mimetype,
+    });
   }
 
   /**
    * Get document by ID
    */
   async getDocument(id: string): Promise<Document | undefined> {
-    const { rows } = await this.pool.query<DocumentRow>('SELECT * FROM documents WHERE id = $1', [
-      id,
-    ]);
-
-    const row = rows[0];
-    return row ? rowToDocument(row) : undefined;
+    return this.repository.findById(id);
   }
 
   /**
    * Get all documents, most recent first
    */
   async getAllDocuments(): Promise<Document[]> {
-    const { rows } = await this.pool.query<DocumentRow>(
-      'SELECT * FROM documents ORDER BY created_at DESC, id DESC',
-    );
-
-    return rows.map(rowToDocument);
+    // Already ordered by the query: created_at DESC, id DESC.
+    return this.repository.findAll();
   }
 
   /**
@@ -185,54 +69,31 @@ export class DocumentService {
     status: Document['status'],
     error?: string,
   ): Promise<boolean> {
-    const result = await this.pool.query(
-      `UPDATE documents
-          SET status = $2,
-              -- Both NULL and '' mean "no error supplied", which is what the
-              -- previous truthiness check did. COALESCE then keeps the message
-              -- already stored instead of erasing it.
-              error = COALESCE(NULLIF($3, ''), error),
-              updated_at = now()
-        WHERE id = $1`,
-      [id, status, error ?? null],
-    );
-
-    return (result.rowCount ?? 0) > 0;
+    return this.repository.updateStatus(id, status, error);
   }
 
   /**
    * Update document with processing result
    */
   async updateDocumentResult(id: string, result: ProcessingResult): Promise<boolean> {
-    const update = await this.pool.query(
-      `UPDATE documents
-          SET status = 'completed',
-              processing_result = $2,
-              updated_at = now()
-        WHERE id = $1`,
-      [id, toStoredProcessingResult(result)],
-    );
-
-    return (update.rowCount ?? 0) > 0;
+    return this.repository.updateResult(id, result);
   }
 
   /**
    * Delete a document by ID
    */
   async deleteDocument(id: string): Promise<boolean> {
-    const result = await this.pool.query('DELETE FROM documents WHERE id = $1', [id]);
-    return (result.rowCount ?? 0) > 0;
+    return this.repository.delete(id);
   }
 
   /**
    * Clear all documents (useful for testing)
    *
-   * There is no WHERE clause to get wrong here, so the guard is what stands
-   * between a mistyped DATABASE_URL and a wiped development database.
+   * The `_test` guard that makes this safe lives in the repository, so a caller
+   * cannot reach the DELETE without passing it.
    */
   async clearDocuments(): Promise<void> {
-    assertTestDatabase();
-    await this.pool.query('DELETE FROM documents');
+    await this.repository.clear();
   }
 
   /**

@@ -27,7 +27,7 @@ HTTP server — src/server.ts
    ▼
 src/routes/documents.ts — HTTP concerns
    │
-   ├──► DocumentService ──► PostgreSQL — document records and status
+   ├──► DocumentService ──► DocumentRepository ──► PostgreSQL — records and status
    └──► S3 — the file bytes ──► src/processor.ts — background extraction (pdf2json)
 
 The client polls GET /documents/:id/status until processing finishes.

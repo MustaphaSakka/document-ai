@@ -19,9 +19,9 @@ project itself; this directory holds the detail.
 ## [architecture.md](architecture.md)
 
 The two applications and how they connect, the backend and frontend file layouts, the layers
-(view → composable → api on the frontend, router → handler → service on the backend), the
-document lifecycle from upload to extracted text — S3 for the file bytes, PostgreSQL for the
-metadata — and what each configuration file is for.
+(view → composable → api on the frontend, router → handler → service → repository on the
+backend), the document lifecycle from upload to extracted text — S3 for the file bytes,
+PostgreSQL for the metadata — and what each configuration file is for.
 
 **Read it when** you are new to the codebase, or before adding a module and wondering where it
 belongs.

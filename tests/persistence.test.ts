@@ -11,6 +11,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Pool } from 'pg';
 import { DocumentService, documentService } from '../src/document-service.js';
+import { DocumentRepository } from '../src/repositories/document-repository.js';
 import { TEST_DATABASE_URL } from './config.js';
 
 describe('PostgreSQL persistence', () => {
@@ -22,7 +23,7 @@ describe('PostgreSQL persistence', () => {
 
     // A separate pool: separate connections, separate client state.
     otherPool = new Pool({ connectionString: TEST_DATABASE_URL });
-    otherService = new DocumentService(otherPool);
+    otherService = new DocumentService(new DocumentRepository(otherPool));
   });
 
   afterEach(async () => {
