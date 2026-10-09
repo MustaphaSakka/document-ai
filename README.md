@@ -1,317 +1,87 @@
 # Document AI
 
-A document processing application built with Node.js and TypeScript, designed to integrate with AWS services (S3, Bedrock).
+A document processing application built with Node.js and TypeScript, with a Vue 3 frontend.
+Documents are uploaded to Amazon S3, their text is extracted in the background, and the result
+is served over a small HTTP API.
 
-## 🚀 Quick Start
+## Features
+
+- **Upload** a document (PDF, Word, JPEG, PNG or plain text, max 5 MB), streamed to Amazon S3
+- **Text extraction** for PDFs, with word count and page estimate
+- **Document list** with name, status, date and size
+- **Status tracking**: `pending` → `processing` → `completed` / `failed`
+- **Extracted text** endpoint, distinct from the 409 returned while processing is unfinished
+- **Deletion**, which removes the S3 objects and the record
+- **Web interface** covering all of it: list, upload, detail, extracted text, delete, and live
+  status updates that need no page reload
+
+## Architecture at a glance
+
+```
+Browser — Vue 3 + Vite (:5173)
+   │   /api/* proxied by Vite to http://localhost:3000
+   ▼
+HTTP server — src/server.ts
+   │   route table: method + path segments
+   ▼
+src/routes/documents.ts — HTTP concerns
+   │
+   ├──► DocumentService — in-memory records and status
+   └──► S3 (documents) ──► src/processor.ts — background extraction (pdf2json)
+
+The client polls GET /documents/:id/status until processing finishes.
+```
+
+Details, layers and file layout: [docs/architecture.md](docs/architecture.md).
+
+## Quick start
+
+Two processes, two terminals. The backend needs `AWS_REGION` and `AWS_S3_BUCKET_NAME` — it
+refuses to start without them.
 
 ```bash
-# Install dependencies
+# Terminal 1 — API on http://localhost:3000
 npm install
-
-# Run in development mode
+cp .env.example .env     # then set AWS_REGION and AWS_S3_BUCKET_NAME
+                         # (if .env already exists, just edit it)
 npm run dev
 
-# Run tests
-npm test
-
-# Build for production
-npm run build
-npm start
-```
-
-### Frontend
-
-The web interface lives in [`frontend/`](frontend/) and talks to the API above.
-It has its own dependencies and commands:
-
-```bash
+# Terminal 2 — interface on http://localhost:5173
 cd frontend
 npm install
-npm run dev          # http://localhost:5173 (backend expected on :3000)
-npm run test:e2e     # Cypress end-to-end tests
+npm run dev
 ```
 
-See the [Frontend Conventions](docs/frontend-conventions.md) for the layout,
-the `/api` proxy setup and the conventions this project follows.
+Then open <http://localhost:5173/documents>.
 
-## 📋 Project Overview
+Uploading also needs AWS credentials (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or an IAM
+role). Everything else works without them.
 
-This project is a learning-focused document processing application that demonstrates modern Node.js and TypeScript development practices. The goal is to build expertise in Node.js and TypeScript while creating a functional document processing system.
+## Tests
 
-### Current Status
-- ✅ **TypeScript 5.9** with strict type checking
-- ✅ **Vitest** testing framework setup
-- ✅ **ESLint + Prettier** code quality tools
-- ✅ **Modern development workflow** with hot reload
-- 🔄 **AWS Integration**: Coming soon (S3, Bedrock)
-
-## 🛠️ Tech Stack
-
-### Core Technologies
-- **Node.js**: JavaScript runtime
-- **TypeScript 5.9**: Type-safe JavaScript
-- **Vitest**: Modern testing framework
-- **ESLint**: Code quality and linting
-- **Prettier**: Code formatting
-
-### Development Tools
-- **ts-node**: Run TypeScript directly in development
-- **npm**: Package management and scripts
-
-### Planned AWS Integration
-- **Amazon S3**: Document storage
-- **Amazon Bedrock**: AI/ML services
-
-## 📁 Project Structure
-
-```
-document-ai/
-├── src/                   # TypeScript source code
-│   └── index.ts          # Entry point
-├── tests/                 # Test files
-│   └── example.test.ts   # Example tests
-├── docs/                  # Technical documentation
-├── dist/                  # Compiled JavaScript (generated)
-├── package.json           # Project metadata and scripts
-├── tsconfig.json          # TypeScript configuration
-├── eslint.config.js       # ESLint configuration
-└── .prettierrc           # Prettier configuration
-```
-
-## 🎯 Available Commands
-
-### Development
 ```bash
-npm run dev          # Run TypeScript in development
-npm run build        # Compile TypeScript to JavaScript
-npm start            # Run compiled JavaScript
+npx vitest run                          # backend: 8 files, 100 tests
+cd frontend && npm run test:e2e         # frontend: 5 Cypress specs, 18 tests
 ```
 
-### Testing
-```bash
-npm test             # Run all tests
-npm run test:coverage  # Run tests with coverage
-```
+## Documentation
 
-### Code Quality
-```bash
-npm run lint         # Check code quality
-npm run format       # Format code with Prettier
-npm run typecheck    # Type check without compilation
-```
+| Document | Contents |
+|---|---|
+| [docs/README.md](docs/README.md) | Index of all documentation |
+| [docs/architecture.md](docs/architecture.md) | Layout, layers, request lifecycle |
+| [docs/api.md](docs/api.md) | Endpoints, status codes, known limitations |
+| [docs/frontend-conventions.md](docs/frontend-conventions.md) | Vue 3, TypeScript and Cypress conventions |
+| [docs/development.md](docs/development.md) | Setup, commands, configuration, git |
+| [docs/testing.md](docs/testing.md) | The Vitest and Cypress suites |
+| [docs/technical/](docs/technical/) | Learning notes on Node.js internals |
 
-## 📚 Documentation
+## A note on the goal
 
-Comprehensive technical documentation is available in the [docs/](docs/) directory:
+This is a learning project: the objective is depth in Node.js and TypeScript, so quality,
+type safety and explicitness come before delivery speed. The working principles are in
+[CLAUDE.md](CLAUDE.md).
 
-### Key Documentation
-- **[Commands Reference](docs/commands.md)** - All available npm commands
-- **[TypeScript Setup](docs/typescript-setup.md)** - TypeScript configuration and best practices
-- **[Testing Guide](docs/testing-guide.md)** - Testing with Vitest
-- **[Code Quality Tools](docs/code-quality.md)** - ESLint and Prettier guide
-- **[Project Structure](docs/project-structure.md)** - Codebase organization
-- **[Development Workflow](docs/development-workflow.md)** - Complete development process
-- **[Frontend Conventions](docs/frontend-conventions.md)** - Vue 3 + TypeScript frontend conventions
-- **[Documentation Index](docs/README.md)** - Guide to all documentation
-
-## 🎓 Learning Objectives
-
-This project focuses on developing expertise in:
-- **Modern TypeScript**: Strict type checking, advanced types, patterns
-- **Node.js Patterns**: Async/await, streams, error handling
-- **Testing Practices**: Test-driven development, coverage, patterns
-- **Code Quality**: Linting, formatting, best practices
-- **Development Workflow**: Modern development practices
-
-## 🏗️ Architecture Principles
-
-### Current Approach
-- **Minimal Foundation**: Start with essential tools only
-- **Type-Safe Development**: Leverage TypeScript's type system
-- **Test-Driven**: Write tests alongside code
-- **Iterative Growth**: Add structure as needed
-- **Learning-Focused**: Understand underlying concepts
-
-### Future Evolution
-As requirements emerge, the project will naturally evolve to include:
-- Service layer for AWS integration
-- Configuration management
-- Type definitions for domain objects
-- Utility libraries for common tasks
-
-## 🔧 Configuration
-
-### TypeScript
-- **Strict mode enabled** for maximum type safety
-- **Target**: ES2022 (modern JavaScript)
-- **Module**: NodeNext (latest Node.js modules)
-- **Output**: `dist/` directory with source maps
-
-### Code Quality
-- **ESLint**: TypeScript-specific rules with type checking
-- **Prettier**: Consistent code formatting (single quotes, 2-space indent)
-- **Integration**: ESLint and Prettier work together seamlessly
-
-### Testing
-- **Framework**: Vitest with TypeScript support
-- **Coverage**: Built-in coverage reporting
-- **Watch mode**: Automatic test re-running on file changes
-
-## 🚦 Getting Started
-
-### Prerequisites
-- Node.js 18+ (recommended: latest LTS)
-- npm 9+ (comes with Node.js)
-- Git (for version control)
-
-### Initial Setup
-1. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-
-2. **Verify setup**:
-   ```bash
-   npm run typecheck  # Check TypeScript types
-   npm run lint       # Check code quality
-   npm test           # Run tests
-   npm run build      # Compile TypeScript
-   npm start          # Run application
-   ```
-
-3. **Start development**:
-   ```bash
-   npm run dev  # Runs TypeScript directly
-   ```
-
-## 📖 Development Workflow
-
-### 1. Planning
-- Review existing code and conventions
-- Understand requirements
-- Plan TypeScript types and testing strategy
-
-### 2. Implementation
-- Define TypeScript interfaces first
-- Implement with explicit types
-- Write tests alongside code
-- Run tests frequently
-
-### 3. Quality Check
-```bash
-npm run typecheck  # Type checking
-npm run lint       # Code quality
-npm run format     # Formatting
-npm test           # Testing
-```
-
-### 4. Build and Verify
-```bash
-npm run build      # Compile
-npm start          # Run production version
-```
-
-## 🧪 Testing
-
-### Current Tests
-- Basic setup verification (4 passing tests)
-- Type safety validation
-- Async/await functionality
-- TypeScript type handling
-
-### Running Tests
-```bash
-npm test              # Run all tests (watch mode)
-npm run test:coverage # Run with coverage report
-```
-
-### Test Structure
-```
-tests/
-└── example.test.ts   # Setup verification tests
-```
-
-## 🔍 Code Quality Standards
-
-### TypeScript Standards
-- **Strict type checking** enabled
-- **Explicit return types** for all functions
-- **No implicit any** types
-- **Comprehensive type definitions**
-
-### Code Style
-- **Single quotes** for strings
-- **2-space indentation**
-- **Trailing commas** where applicable
-- **Semicolons required**
-
-### Quality Checks
-- **ESLint**: Type-aware linting with strict rules
-- **Prettier**: Consistent code formatting
-- **TypeScript**: Compile-time type checking
-
-## 🛣️ Roadmap
-
-### Phase 1: Foundation (Current)
-- ✅ TypeScript + Node.js setup
-- ✅ Testing framework
-- ✅ Code quality tools
-- ✅ Development workflow
-
-### Phase 2: Core Features (Next)
-- Document upload functionality
-- File processing utilities
-- Error handling and validation
-- Logging and monitoring
-
-### Phase 3: AWS Integration (Future)
-- S3 storage integration
-- Bedrock AI services
-- AWS authentication and configuration
-
-### Phase 4: Enhancement (Future)
-- Batch processing
-- Document workflows
-- API endpoints
-- User interface
-
-## 🤝 Contributing
-
-### Development Guidelines
-1. **Read the documentation**: Start with [docs/README.md](docs/README.md)
-2. **Follow the workflow**: Use the established development process
-3. **Write tests**: Ensure all code is tested
-4. **Maintain quality**: Fix all linting and type issues
-5. **Document changes**: Update relevant documentation
-
-### Code Review Process
-- All changes go through pull requests
-- Automated checks must pass
-- Code quality standards maintained
-- Documentation updated as needed
-
-## 📞 Support
-
-### Documentation
-- Comprehensive guides in [docs/](docs/) directory
-- [Documentation Index](docs/README.md) for navigation
-- Troubleshooting sections in each guide
-
-### Learning Resources
-- [TypeScript Handbook](https://www.typescriptlang.org/docs/handbook/intro.html)
-- [Node.js Documentation](https://nodejs.org/docs)
-- [Vitest Documentation](https://vitest.dev/)
-
-## 📄 License
+## License
 
 ISC
-
-## 👤 Author
-
-Building expertise in Node.js and TypeScript through practical application development.
-
----
-
-**Note**: This project is designed for learning and skill development. The focus is on understanding modern Node.js and TypeScript practices rather than rapid feature delivery. Quality, type safety, and maintainability are prioritized over speed.
-
-For detailed technical documentation, see the [docs/](docs/) directory.
