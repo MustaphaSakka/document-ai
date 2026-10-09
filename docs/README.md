@@ -104,6 +104,21 @@ HTTP endpoints currently exposed by the document service.
 
 **When to read:** When calling the API from a client, or before adding new endpoints.
 
+---
+
+### 🖥️ [Frontend Conventions](frontend-conventions.md)
+Conventions for the Vue 3 + TypeScript frontend in `frontend/`.
+
+**What you'll learn:**
+- Project layout and the view → composable → api layering
+- The `/api` proxy prefix and why it exists
+- TypeScript rules, API response typing and UI state handling
+- Vue 3, component, naming and async conventions
+- Cypress practices: stubbing with `cy.intercept`, testing behaviour
+- Accessibility, responsive rules and the dependency bar
+
+**When to read:** Before adding or changing anything under `frontend/`.
+
 ## Quick Reference Guides
 
 ### By Task
@@ -128,6 +143,7 @@ HTTP endpoints currently exposed by the document service.
 - **TypeScript configuration**: [TypeScript Setup](typescript-setup.md)
 - **Testing approach**: [Testing Guide → Overview](testing-guide.md#overview)
 - **Development process**: [Development Workflow](development-workflow.md)
+- **Frontend**: [Frontend Conventions](frontend-conventions.md)
 
 ## Key Concepts by Tool
 

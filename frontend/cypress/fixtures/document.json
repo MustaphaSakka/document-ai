@@ -1,0 +1,14 @@
+{
+  "id": "doc_001",
+  "name": "rapport-annuel.pdf",
+  "status": "completed",
+  "createdAt": "2026-02-01T10:00:00.000Z",
+  "size": 204800,
+  "mimetype": "application/pdf",
+  "processingResult": {
+    "wordCount": 412,
+    "pageEstimated": 2,
+    "processingDuration": 87,
+    "processedAt": "2026-02-01T10:00:01.000Z"
+  }
+}

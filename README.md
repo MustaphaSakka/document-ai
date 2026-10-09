@@ -19,6 +19,21 @@ npm run build
 npm start
 ```
 
+### Frontend
+
+The web interface lives in [`frontend/`](frontend/) and talks to the API above.
+It has its own dependencies and commands:
+
+```bash
+cd frontend
+npm install
+npm run dev          # http://localhost:5173 (backend expected on :3000)
+npm run test:e2e     # Cypress end-to-end tests
+```
+
+See the [Frontend Conventions](docs/frontend-conventions.md) for the layout,
+the `/api` proxy setup and the conventions this project follows.
+
 ## 📋 Project Overview
 
 This project is a learning-focused document processing application that demonstrates modern Node.js and TypeScript development practices. The goal is to build expertise in Node.js and TypeScript while creating a functional document processing system.
@@ -96,6 +111,7 @@ Comprehensive technical documentation is available in the [docs/](docs/) directo
 - **[Code Quality Tools](docs/code-quality.md)** - ESLint and Prettier guide
 - **[Project Structure](docs/project-structure.md)** - Codebase organization
 - **[Development Workflow](docs/development-workflow.md)** - Complete development process
+- **[Frontend Conventions](docs/frontend-conventions.md)** - Vue 3 + TypeScript frontend conventions
 - **[Documentation Index](docs/README.md)** - Guide to all documentation
 
 ## 🎓 Learning Objectives
