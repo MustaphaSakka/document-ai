@@ -1,26 +1,33 @@
 # Testing
 
 Two independent suites. Neither needs the other: the backend suite runs without a browser,
-the frontend suite runs without a backend.
+the frontend suite runs without a backend and without a database.
 
-| Suite | Tool | Location | Run from | Size |
-|---|---|---|---|---|
-| Backend unit and integration | Vitest | `tests/` | repository root | 8 files, 100 tests |
-| Frontend end-to-end | Cypress | `frontend/cypress/e2e/` | `frontend/` | 5 specs, 18 tests |
+| Suite | Tool | Location | Run from | Size | Needs |
+|---|---|---|---|---|---|
+| Backend unit and integration | Vitest | `tests/` | repository root | 11 files, 130 tests | PostgreSQL |
+| Frontend end-to-end | Cypress | `frontend/cypress/e2e/` | `frontend/` | 5 specs, 18 tests | — |
 
 ## Backend (Vitest)
 
 ```bash
+npm run db:up           # PostgreSQL, required
 npx vitest run          # one pass
 npm test                # watch mode
 npm run test:coverage   # with a coverage report
 ```
 
+`npm run db:up` is the only preparation: the suite creates its own database contents, applying
+the migrations and emptying the table between tests.
+
 ### Layout
 
 ```
 tests/
-├── setup.ts                    global setup: mocks the AWS SDK
+├── setup.ts                    per-file setup: mocks the AWS SDK
+├── config.ts                   the test DATABASE_URL, decided in one place
+├── global-setup.ts             once per suite: checks the name, applies the migrations
+├── db.ts                       helpers for the tests that talk to PostgreSQL
 ├── example.test.ts             sanity checks on the toolchain
 ├── server.test.ts              routing, dispatch, 404s
 ├── document-management.test.ts the /documents endpoints end to end
@@ -28,18 +35,36 @@ tests/
 ├── document-service.test.ts    status transitions, id generation
 ├── processor.test.ts           background processing, success and failure
 ├── pdf-extraction.test.ts      the pdf2json wrapper and text statistics
+├── persistence.test.ts         state lives in PostgreSQL, not in the service
+├── database-errors.test.ts     what the API answers when PostgreSQL is unreachable
+├── test-database-guard.test.ts the `_test` suffix guard on destructive statements
 └── lambda-processor.test.ts    the Lambda handler and its event validation
 ```
 
 ### Configuration
 
-`vitest.config.ts` sets `AWS_REGION`, `AWS_S3_BUCKET_NAME` and `NODE_ENV=test` for the suite
-and loads `tests/setup.ts`. That file replaces `@aws-sdk/client-s3` with `vi.mock`, so no test
-reaches AWS: `GetObjectCommand` returns an in-memory stream and every other command succeeds
-silently. That is why the whole suite runs in about a second, with no credentials.
+`vitest.config.ts` sets `AWS_REGION`, `AWS_S3_BUCKET_NAME`, `NODE_ENV=test` and `DATABASE_URL`
+for the suite, loads `tests/setup.ts`, and runs `tests/global-setup.ts`.
 
-The mock lives in one place on purpose: tests exercise the same code as production, and only
-the network boundary is replaced.
+`tests/setup.ts` replaces `@aws-sdk/client-s3` with `vi.mock`, so no test reaches AWS:
+`GetObjectCommand` returns an in-memory stream and every other command succeeds silently. That is
+why the suite needs no credentials and no network. The mock lives in one place on purpose: tests
+exercise the same code as production, and only the network boundary is replaced.
+
+PostgreSQL is the one collaborator that is **not** mocked. The suite runs against a real
+database, because the SQL and the round trip through it are what most of these tests are about.
+
+- `tests/config.ts` holds the connection string — the single place `vitest.config.ts` and
+  `tests/global-setup.ts` both read it from, so the two cannot drift apart. It defaults to
+  `document_ai_test` on the local container.
+- `tests/global-setup.ts` runs once, in its own process, before any test file. It refuses to run
+  unless the database name ends in `_test`, then applies the migrations. It closes its own pool
+  afterwards, or Vitest would never exit.
+- `fileParallelism` is off. Every file shares one database and empties it between tests, so
+  running files in parallel would have them deleting each other's rows.
+- `tests/persistence.test.ts` is the one that proves persistence rather than assuming it: it
+  reads through a second pool and a second `DocumentService`, neither of which the application's
+  service has ever seen. The old in-memory `Map` could not have passed it.
 
 ### Conventions
 
@@ -48,8 +73,9 @@ the network boundary is replaced.
   (`it('rejects a file larger than 5 MB')`).
 - Assert on observable results — status codes, returned objects, thrown errors — rather than
   on internal calls, unless the call *is* the contract.
-- Tests must be independent. `document-service.ts` exports a singleton, so reset state in
-  `beforeEach` instead of relying on file order.
+- Tests must be independent. `document-service.ts` exports a singleton holding the shared pool,
+  so reset state in `beforeEach` — `documentService.clearDocuments()` empties the table — rather
+  than relying on file order. That call is what the `_test` guard exists to make safe.
 
 ## Frontend (Cypress)
 

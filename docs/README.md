@@ -20,7 +20,8 @@ project itself; this directory holds the detail.
 
 The two applications and how they connect, the backend and frontend file layouts, the layers
 (view → composable → api on the frontend, router → handler → service on the backend), the
-document lifecycle from upload to extracted text, and what each configuration file is for.
+document lifecycle from upload to extracted text — S3 for the file bytes, PostgreSQL for the
+metadata — and what each configuration file is for.
 
 **Read it when** you are new to the codebase, or before adding a module and wondering where it
 belongs.
@@ -29,7 +30,7 @@ belongs.
 
 Every endpoint with its parameters, response bodies and status codes — including the
 distinctions that matter to a client: `409` while processing is unfinished versus `404` when
-there is no text, and the documented limitations (in-memory storage, PDF-only extraction).
+there is no text, and the documented limitations (PDF-only extraction, no authentication).
 
 **Read it when** you are calling the API, or changing an endpoint.
 
@@ -44,17 +45,18 @@ practices, and the bar a new dependency has to clear.
 
 ## [development.md](development.md)
 
-Prerequisites, installation, environment variables, the backend and frontend command
-references, the TypeScript flags that shape how you write code, the ESLint and Prettier setup,
-git commit conventions, and the checks to run before committing.
+Prerequisites, installation, environment variables, running PostgreSQL locally and applying
+the migrations, the backend and frontend command references, the TypeScript flags that shape
+how you write code, the ESLint and Prettier setup, git commit conventions, and the checks to
+run before committing.
 
 **Read it when** you are setting up the project, or you need the exact command for something.
 
 ## [testing.md](testing.md)
 
 The two suites — Vitest for the backend, Cypress for the frontend — with their layouts,
-configuration, conventions and how to run each one. Includes what the AWS SDK mock does and
-why the polling tests are written the way they are.
+configuration, conventions and how to run each one. Includes why the backend suite needs a real
+PostgreSQL while AWS is mocked, and why the polling tests are written the way they are.
 
 **Read it when** you are writing tests, or a test fails and you need to know where it lives.
 

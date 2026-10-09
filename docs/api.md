@@ -5,7 +5,7 @@ HTTP API exposed by the document service (`src/server.ts`, handlers in `src/rout
 - **Base URL**: `http://localhost:3000` (port set in `src/index.ts`)
 - **Format**: all responses are JSON, with `Content-Type: application/json`
 - **Authentication**: none
-- **Storage**: documents live in an in-memory `Map` (see [Known Limitations](#known-limitations))
+- **Storage**: metadata in PostgreSQL, file bytes in Amazon S3
 
 ## Conventions
 
@@ -182,7 +182,8 @@ Delete a document.
 
 - **Parameters**: `id` — the document identifier.
 - **Side effects**: deletes the stored S3 object, then the `documents/{uuid}-extracted.json` object when
-  the source is a PDF, then the in-memory record.
+  the source is a PDF, then the PostgreSQL row. The S3 calls come first on purpose: if either fails the
+  document stays visible and the request can be retried.
 
 **204 No Content** — empty body.
 
@@ -207,12 +208,10 @@ Liveness check.
 
 ## Known Limitations
 
-1. **No persistence.** Documents are held in memory (`DocumentService`). Restarting the server loses
-   every record; the S3 objects remain. Re-uploading is the only recovery path today.
-2. **Text extraction is PDF-only.** Other accepted types (Word, JPEG, PNG) are counted but have no
+1. **Text extraction is PDF-only.** Other accepted types (Word, JPEG, PNG) are counted but have no
    extracted text, so `GET /documents/:id/text` returns `404` for them.
-3. **Status reflects this API only.** The extraction Lambda writes its own
+2. **Status reflects this API only.** The extraction Lambda writes its own
    `documents/{uuid}-extracted.json` to S3 and the API does not read it back, so processing done there
    is not visible through these endpoints.
-4. **None of these exist yet**: authentication, pagination, search, document update, persistent
-   processing history.
+3. **None of these exist yet**: authentication, pagination, search, document update, processing
+   history across attempts.

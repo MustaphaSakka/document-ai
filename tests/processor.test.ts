@@ -48,72 +48,83 @@ vi.mock('@aws-sdk/client-s3', () => ({
 }));
 
 describe('Document processing', () => {
-  beforeEach(() => {
-    documentService.clearDocuments();
+  beforeEach(async () => {
+    await documentService.clearDocuments();
     resetIdCounter();
   });
 
   it('should extract the text of a PDF', async () => {
-    const document = documentService.createDocument({
+    const created = await documentService.createDocument({
       name: 'report.pdf',
       s3Bucket: 'test-bucket',
       s3Key: 'documents/report.pdf',
       mimetype: 'application/pdf',
     });
 
-    await processDocument(document.id, { simulateDelay: 1 });
+    await processDocument(created.id, { simulateDelay: 1 });
 
-    expect(document.status).toBe('completed');
-    expect(document.processingResult?.extractedText).toBeDefined();
-    expect(document.processingResult?.extractedText?.length).toBeGreaterThan(0);
-    expect(document.processingResult?.wordCount).toBeGreaterThan(0);
-    expect(document.processingResult?.numpages).toBeGreaterThanOrEqual(1);
-    expect(document.processingResult?.processedAt).toBeInstanceOf(Date);
+    // The service hands out copies, so the row is read back from PostgreSQL to
+    // check what processing actually persisted.
+    const document = await documentService.getDocument(created.id);
+
+    expect(document?.status).toBe('completed');
+    expect(document?.processingResult?.extractedText).toBeDefined();
+    expect(document?.processingResult?.extractedText?.length).toBeGreaterThan(0);
+    expect(document?.processingResult?.wordCount).toBeGreaterThan(0);
+    expect(document?.processingResult?.numpages).toBeGreaterThanOrEqual(1);
+    // processedAt is a JSON string inside JSONB and has to be revived.
+    expect(document?.processingResult?.processedAt).toBeInstanceOf(Date);
   });
 
   it('should count words on the decoded content for a text file', async () => {
-    const document = documentService.createDocument({
+    const created = await documentService.createDocument({
       name: 'notes.txt',
       s3Bucket: 'test-bucket',
       s3Key: 'documents/notes.txt',
       mimetype: 'text/plain',
     });
 
-    await processDocument(document.id, { simulateDelay: 1 });
+    await processDocument(created.id, { simulateDelay: 1 });
 
-    expect(document.status).toBe('completed');
-    expect(document.processingResult?.extractedText).toBe(TEXT_CONTENT);
-    expect(document.processingResult?.wordCount).toBe(6);
-    expect(document.processingResult?.pageEstimated).toBe(1);
+    const document = await documentService.getDocument(created.id);
+
+    expect(document?.status).toBe('completed');
+    expect(document?.processingResult?.extractedText).toBe(TEXT_CONTENT);
+    expect(document?.processingResult?.wordCount).toBe(6);
+    expect(document?.processingResult?.pageEstimated).toBe(1);
   });
 
   it('should not expose text for a type that is not text-extracted', async () => {
-    const document = documentService.createDocument({
+    const created = await documentService.createDocument({
       name: 'letter.docx',
       s3Bucket: 'test-bucket',
       s3Key: 'documents/letter.docx',
       mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     });
 
-    await processDocument(document.id, { simulateDelay: 1 });
+    await processDocument(created.id, { simulateDelay: 1 });
 
-    expect(document.status).toBe('completed');
-    expect(document.processingResult?.extractedText).toBeUndefined();
+    const document = await documentService.getDocument(created.id);
+
+    expect(document?.status).toBe('completed');
+    expect(document?.processingResult?.extractedText).toBeUndefined();
   });
 
   it('should mark the document as failed when extraction fails', async () => {
-    const document = documentService.createDocument({
+    const created = await documentService.createDocument({
       name: 'broken.pdf',
       s3Bucket: 'test-bucket',
       s3Key: 'documents/broken.pdf',
       mimetype: 'application/pdf',
     });
 
-    await expect(processDocument(document.id, { simulateDelay: 1 })).rejects.toThrow();
+    await expect(processDocument(created.id, { simulateDelay: 1 })).rejects.toThrow();
 
-    expect(document.status).toBe('failed');
-    expect(document.error).toBeDefined();
-    expect(document.processingResult).toBeUndefined();
+    const document = await documentService.getDocument(created.id);
+
+    expect(document?.status).toBe('failed');
+    expect(document?.error).toBeDefined();
+    expect(document?.processingResult).toBeUndefined();
   });
 
   it('should throw for an unknown document', async () => {
@@ -121,12 +132,14 @@ describe('Document processing', () => {
   });
 
   it('should fail a document without S3 location', async () => {
-    const document = documentService.createDocument({ name: 'local.txt' });
+    const created = await documentService.createDocument({ name: 'local.txt' });
 
-    await expect(processDocument(document.id, { simulateDelay: 1 })).rejects.toThrow(
+    await expect(processDocument(created.id, { simulateDelay: 1 })).rejects.toThrow(
       'no S3 location',
     );
 
-    expect(document.status).toBe('failed');
+    const document = await documentService.getDocument(created.id);
+
+    expect(document?.status).toBe('failed');
   });
 });

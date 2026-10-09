@@ -12,10 +12,31 @@ import { resetIdCounter } from '../src/utils';
 let server: http.Server;
 let baseUrl: string;
 
+/**
+ * Wait until a document has reached the expected status.
+ *
+ * triggerDocumentProcessing is deliberately fire-and-forget, so the test has to
+ * wait for the background work. Polling the persisted row is both faster and
+ * less fragile than sleeping for a fixed period, which either wasted time or
+ * failed on a slow machine.
+ */
+async function waitForStatus(documentId: string, status: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if ((await documentService.getDocument(documentId))?.status === status) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+
+  throw new Error(`Document ${documentId} did not reach status "${status}" within ${timeoutMs}ms`);
+}
+
 describe('HTTP Server', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // Reset state before tests
-    documentService.clearDocuments();
+    await documentService.clearDocuments();
     resetIdCounter();
 
     // Ensure temp directory exists
@@ -103,8 +124,8 @@ describe('HTTP Server', () => {
   });
 
   describe('GET /documents/:id', () => {
-    beforeEach(() => {
-      documentService.clearDocuments();
+    beforeEach(async () => {
+      await documentService.clearDocuments();
       resetIdCounter();
     });
 
@@ -120,7 +141,7 @@ describe('HTTP Server', () => {
 
     it('should return document with pending status', async () => {
       // Create a document directly
-      const document = documentService.createDocument({
+      const document = await documentService.createDocument({
         name: 'pending-doc.pdf',
         size: 1024,
         mimetype: 'application/pdf',
@@ -142,7 +163,7 @@ describe('HTTP Server', () => {
 
     it('should return document with completed status and results', async () => {
       // Create a document without a file (simulating completed state)
-      const document = documentService.createDocument({
+      const document = await documentService.createDocument({
         name: 'completed-doc.txt',
         size: 1024,
         mimetype: 'application/pdf',
@@ -150,7 +171,7 @@ describe('HTTP Server', () => {
 
       // Manually set to completed with processing results
       const { documentService: ds } = await import('../src/document-service.js');
-      ds.updateDocumentResult(document.id, {
+      await ds.updateDocumentResult(document.id, {
         wordCount: 250,
         pageEstimated: 1,
         processingDuration: 100,
@@ -173,7 +194,7 @@ describe('HTTP Server', () => {
 
     it('should return document with failed status and error', async () => {
       // Create a document without a file
-      const document = documentService.createDocument({
+      const document = await documentService.createDocument({
         name: 'failed-doc.txt',
       });
 
@@ -181,8 +202,8 @@ describe('HTTP Server', () => {
       const { triggerDocumentProcessing } = await import('../src/processor.js');
       triggerDocumentProcessing(document.id);
 
-      // Wait for processing to fail
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Wait for the background processing to record its failure
+      await waitForStatus(document.id, 'failed');
 
       // Get the document
       const response = await fetch(`${baseUrl}/documents/${document.id}`);
@@ -231,8 +252,8 @@ describe('HTTP Server', () => {
   });
 
   describe('Server functionality', () => {
-    beforeEach(() => {
-      documentService.clearDocuments();
+    beforeEach(async () => {
+      await documentService.clearDocuments();
       resetIdCounter();
     });
 

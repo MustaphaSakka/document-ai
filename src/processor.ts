@@ -22,16 +22,16 @@ export async function processDocument(
   documentId: string,
   options: ProcessingOptions = {},
 ): Promise<void> {
-  const document = documentService.getDocument(documentId);
+  const document = await documentService.getDocument(documentId);
   if (!document) {
     throw new Error(`Document ${documentId} not found`);
   }
 
   // Update status to processing first
-  documentService.updateDocumentStatus(documentId, 'processing');
+  await documentService.updateDocumentStatus(documentId, 'processing');
 
   if (!document.s3Bucket || !document.s3Key) {
-    documentService.updateDocumentStatus(documentId, 'failed', 'Document has no S3 location');
+    await documentService.updateDocumentStatus(documentId, 'failed', 'Document has no S3 location');
     throw new Error(`Document ${documentId} has no S3 location`);
   }
 
@@ -42,7 +42,11 @@ export async function processDocument(
         try {
           // Check if we should simulate failure
           if (options.simulateFailure) {
-            documentService.updateDocumentStatus(documentId, 'failed', 'Simulated processing failure');
+            await documentService.updateDocumentStatus(
+              documentId,
+              'failed',
+              'Simulated processing failure',
+            );
             reject(new Error('Simulated processing failure'));
             return;
           }
@@ -53,11 +57,20 @@ export async function processDocument(
             document.s3Key!,
             document.mimetype,
           );
-          documentService.updateDocumentResult(documentId, result);
+          await documentService.updateDocumentResult(documentId, result);
           resolve();
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown processing error';
-          documentService.updateDocumentStatus(documentId, 'failed', errorMessage);
+
+          // Recording the failure is itself a database call now, so it can fail
+          // too. Swallowing that here keeps the promise settled: an update that
+          // throws would otherwise leave processDocument pending for ever.
+          try {
+            await documentService.updateDocumentStatus(documentId, 'failed', errorMessage);
+          } catch (updateError) {
+            console.error(`Could not record the failure of ${documentId}:`, updateError);
+          }
+
           reject(error instanceof Error ? error : new Error(errorMessage));
         }
       })();

@@ -9,6 +9,9 @@
     "dev:watch": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "migrate": "tsx src/migrate.ts",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "eslint src",
@@ -27,6 +30,7 @@
     "@eslint/js": "^10.0.1",
     "@types/busboy": "^1.5.4",
     "@types/node": "^26.2.0",
+    "@types/pg": "^8.23.1",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.67.0",
     "@vitest/coverage-v8": "^4.1.11",
@@ -43,6 +47,7 @@
     "@aws-sdk/client-s3": "^3.1117.0",
     "busboy": "^1.6.0",
     "dotenv": "^17.4.2",
-    "pdf2json": "^4.0.3"
+    "pdf2json": "^4.0.3",
+    "pg": "^8.23.1"
   }
 }

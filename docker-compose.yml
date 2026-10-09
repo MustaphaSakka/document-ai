@@ -1,0 +1,41 @@
+# Local PostgreSQL, for development and for the test suite.
+#
+# The credentials below belong to a throwaway container on your machine: they
+# are not secrets, and the application never reads them directly. The only
+# thing the application reads is DATABASE_URL (.env.example points at this
+# container).
+#
+#   docker compose up -d --wait   start, and block until it accepts connections
+#   docker compose down           stop; data stays in the named volume
+#   docker compose down -v        stop and delete the data
+#
+# Both databases are created on first start: `document_ai` from POSTGRES_DB
+# below, `document_ai_test` from the script mounted into the init directory.
+# That directory is only read when the data volume is empty, so if you change
+# it you have to recreate the volume.
+
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: document-ai-db
+    environment:
+      POSTGRES_USER: document_ai
+      POSTGRES_PASSWORD: document_ai
+      POSTGRES_DB: document_ai
+    ports:
+      - '5432:5432'
+    volumes:
+      # Mounted one level above the data directory on purpose. From PostgreSQL 18
+      # the image stores data under a major-version-specific subdirectory, and it
+      # refuses to start if the volume is mounted directly on
+      # /var/lib/postgresql/data, which is where 17 and earlier expected it.
+      - pgdata:/var/lib/postgresql
+      - ./db/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U document_ai -d document_ai']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -8,6 +8,7 @@ import { createServer } from '../src/server';
 import { documentService } from '../src/document-service';
 import { s3Client } from '../src/s3-client';
 import { resetIdCounter } from '../src/utils';
+import { setCreatedAt } from './db.js';
 
 let server: http.Server;
 let baseUrl: string;
@@ -16,8 +17,8 @@ const S3_KEY = 'documents/11111111-2222-3333-4444-555555555555.pdf';
 const EXTRACTED_KEY = 'documents/11111111-2222-3333-4444-555555555555-extracted.json';
 
 /** Create a document that finished processing and has extracted text */
-function seedCompletedDocument(name = 'report.pdf') {
-  const document = documentService.createDocument({
+async function seedCompletedDocument(name = 'report.pdf') {
+  const document = await documentService.createDocument({
     name,
     s3Bucket: 'test-bucket',
     s3Key: S3_KEY,
@@ -25,7 +26,7 @@ function seedCompletedDocument(name = 'report.pdf') {
     mimetype: 'application/pdf',
   });
 
-  documentService.updateDocumentResult(document.id, {
+  await documentService.updateDocumentResult(document.id, {
     wordCount: 4,
     pageEstimated: 1,
     processingDuration: 12,
@@ -60,8 +61,8 @@ describe('Document management endpoints', () => {
     server.close();
   });
 
-  beforeEach(() => {
-    documentService.clearDocuments();
+  beforeEach(async () => {
+    await documentService.clearDocuments();
     resetIdCounter();
     vi.clearAllMocks();
   });
@@ -76,14 +77,15 @@ describe('Document management endpoints', () => {
     });
 
     it('should return all documents, most recent first', async () => {
-      const oldest = documentService.createDocument({ name: 'oldest.txt' });
-      oldest.createdAt = new Date('2026-01-01T00:00:00.000Z');
+      // created_at belongs to the database now: the timestamps are written
+      // there instead of onto the returned objects, which are only copies.
+      const oldest = await documentService.createDocument({ name: 'oldest.txt' });
+      const newest = await documentService.createDocument({ name: 'newest.txt' });
+      const middle = await documentService.createDocument({ name: 'middle.txt' });
 
-      const newest = documentService.createDocument({ name: 'newest.txt' });
-      newest.createdAt = new Date('2026-03-01T00:00:00.000Z');
-
-      const middle = documentService.createDocument({ name: 'middle.txt' });
-      middle.createdAt = new Date('2026-02-01T00:00:00.000Z');
+      await setCreatedAt(oldest.id, new Date('2026-01-01T00:00:00.000Z'));
+      await setCreatedAt(newest.id, new Date('2026-03-01T00:00:00.000Z'));
+      await setCreatedAt(middle.id, new Date('2026-02-01T00:00:00.000Z'));
 
       const response = await fetch(`${baseUrl}/documents`);
       const data = await response.json();
@@ -104,7 +106,7 @@ describe('Document management endpoints', () => {
     });
 
     it('should not expose the extracted text', async () => {
-      seedCompletedDocument();
+      await seedCompletedDocument();
 
       const response = await fetch(`${baseUrl}/documents`);
       const data = await response.json();
@@ -124,7 +126,7 @@ describe('Document management endpoints', () => {
     });
 
     it('should return pending for a new document', async () => {
-      const document = documentService.createDocument({ name: 'new.pdf' });
+      const document = await documentService.createDocument({ name: 'new.pdf' });
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/status`);
 
@@ -137,7 +139,7 @@ describe('Document management endpoints', () => {
     });
 
     it('should return completed without the processing result', async () => {
-      const document = seedCompletedDocument();
+      const document = await seedCompletedDocument();
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/status`);
       const data = await response.json();
@@ -147,8 +149,8 @@ describe('Document management endpoints', () => {
     });
 
     it('should return failed with the error message', async () => {
-      const document = documentService.createDocument({ name: 'broken.pdf' });
-      documentService.updateDocumentStatus(document.id, 'failed', 'Extraction failed');
+      const document = await documentService.createDocument({ name: 'broken.pdf' });
+      await documentService.updateDocumentStatus(document.id, 'failed', 'Extraction failed');
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/status`);
       const data = await response.json();
@@ -166,8 +168,8 @@ describe('Document management endpoints', () => {
     });
 
     it('should return 409 while the document is processing', async () => {
-      const document = documentService.createDocument({ name: 'busy.pdf' });
-      documentService.updateDocumentStatus(document.id, 'processing');
+      const document = await documentService.createDocument({ name: 'busy.pdf' });
+      await documentService.updateDocumentStatus(document.id, 'processing');
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/text`);
 
@@ -176,8 +178,8 @@ describe('Document management endpoints', () => {
     });
 
     it('should return 409 when processing failed', async () => {
-      const document = documentService.createDocument({ name: 'broken.pdf' });
-      documentService.updateDocumentStatus(document.id, 'failed', 'Extraction failed');
+      const document = await documentService.createDocument({ name: 'broken.pdf' });
+      await documentService.updateDocumentStatus(document.id, 'failed', 'Extraction failed');
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/text`);
 
@@ -187,8 +189,8 @@ describe('Document management endpoints', () => {
 
     it('should return 404 when the document has no extracted text', async () => {
       // Word documents are not text-extracted
-      const document = documentService.createDocument({ name: 'letter.docx' });
-      documentService.updateDocumentResult(document.id, {
+      const document = await documentService.createDocument({ name: 'letter.docx' });
+      await documentService.updateDocumentResult(document.id, {
         wordCount: 3,
         pageEstimated: 1,
         processingDuration: 5,
@@ -201,7 +203,7 @@ describe('Document management endpoints', () => {
     });
 
     it('should return the extracted text', async () => {
-      const document = seedCompletedDocument();
+      const document = await seedCompletedDocument();
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/text`);
 
@@ -215,8 +217,8 @@ describe('Document management endpoints', () => {
     });
 
     it('should return an empty string for a PDF without a text layer', async () => {
-      const document = documentService.createDocument({ name: 'scan.pdf' });
-      documentService.updateDocumentResult(document.id, {
+      const document = await documentService.createDocument({ name: 'scan.pdf' });
+      await documentService.updateDocumentResult(document.id, {
         wordCount: 0,
         pageEstimated: 1,
         processingDuration: 5,
@@ -240,20 +242,20 @@ describe('Document management endpoints', () => {
     });
 
     it('should delete the document and its S3 objects', async () => {
-      const document = seedCompletedDocument();
+      const document = await seedCompletedDocument();
 
       const response = await fetch(`${baseUrl}/documents/${document.id}`, { method: 'DELETE' });
 
       expect(response.status).toBe(204);
       expect(deletedKeys()).toEqual([S3_KEY, EXTRACTED_KEY]);
-      expect(documentService.getDocument(document.id)).toBeUndefined();
+      expect(await documentService.getDocument(document.id)).toBeUndefined();
 
       const after = await fetch(`${baseUrl}/documents/${document.id}`);
       expect(after.status).toBe(404);
     });
 
     it('should return 404 on a second delete', async () => {
-      const document = seedCompletedDocument();
+      const document = await seedCompletedDocument();
       await fetch(`${baseUrl}/documents/${document.id}`, { method: 'DELETE' });
 
       const second = await fetch(`${baseUrl}/documents/${document.id}`, { method: 'DELETE' });
@@ -262,29 +264,29 @@ describe('Document management endpoints', () => {
     });
 
     it('should delete a document without S3 location', async () => {
-      const document = documentService.createDocument({ name: 'local.txt' });
+      const document = await documentService.createDocument({ name: 'local.txt' });
 
       const response = await fetch(`${baseUrl}/documents/${document.id}`, { method: 'DELETE' });
 
       expect(response.status).toBe(204);
       expect(deletedKeys()).toEqual([]);
-      expect(documentService.getDocument(document.id)).toBeUndefined();
+      expect(await documentService.getDocument(document.id)).toBeUndefined();
     });
 
     it('should keep the document when S3 deletion fails', async () => {
-      const document = seedCompletedDocument();
+      const document = await seedCompletedDocument();
       vi.mocked(s3Client.send).mockRejectedValueOnce(new Error('S3 unavailable'));
 
       const response = await fetch(`${baseUrl}/documents/${document.id}`, { method: 'DELETE' });
 
       expect(response.status).toBe(500);
-      expect(documentService.getDocument(document.id)).toBeDefined();
+      expect(await documentService.getDocument(document.id)).toBeDefined();
     });
   });
 
   describe('Routing', () => {
     it('should not let /documents/:id swallow /documents/:id/status', async () => {
-      const document = documentService.createDocument({ name: 'routing.pdf' });
+      const document = await documentService.createDocument({ name: 'routing.pdf' });
 
       const response = await fetch(`${baseUrl}/documents/${document.id}/status`);
       const data = await response.json();

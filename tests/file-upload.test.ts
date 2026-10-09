@@ -31,8 +31,8 @@ describe('File Upload Tests', () => {
     }
   });
 
-  beforeEach(() => {
-    documentService.clearDocuments();
+  beforeEach(async () => {
+    await documentService.clearDocuments();
     resetIdCounter();
   });
 
@@ -72,7 +72,7 @@ describe('File Upload Tests', () => {
       expect(data.mimetype).toBe('application/pdf');
 
       // Verify file was stored
-      const document = documentService.getDocument(data.id);
+      const document = await documentService.getDocument(data.id);
       expect(document).toBeDefined();
       expect(document?.s3Bucket).toBeDefined();
       expect(document?.s3Key).toBeDefined();
@@ -227,7 +227,7 @@ describe('File Upload Tests', () => {
       expect(putObjectCalls).toHaveLength(0);
 
       // And no document record may be created
-      expect(documentService.getAllDocuments()).toHaveLength(0);
+      expect(await documentService.getAllDocuments()).toHaveLength(0);
     });
   });
 
@@ -281,7 +281,7 @@ describe('File Upload Tests', () => {
       const data = await response.json();
 
       // Verify document was created in service
-      const document = documentService.getDocument(data.id);
+      const document = await documentService.getDocument(data.id);
       expect(document).toBeDefined();
       expect(document?.name).toBe('invoice.pdf');
       // Status can be 'pending', 'processing', or 'completed' since processing starts automatically
@@ -367,7 +367,7 @@ describe('File Upload Tests', () => {
       }
 
       // Verify all documents were created
-      const allDocs = documentService.getAllDocuments();
+      const allDocs = await documentService.getAllDocuments();
       expect(allDocs).toHaveLength(3);
     });
   });
@@ -394,7 +394,7 @@ describe('File Upload Tests', () => {
       });
 
       const data = await response.json();
-      const document = documentService.getDocument(data.id);
+      const document = await documentService.getDocument(data.id);
 
       expect(document?.s3Bucket).toBeDefined();
       expect(document?.s3Key).toBeDefined();

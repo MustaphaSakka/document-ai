@@ -26,11 +26,13 @@ proxy on plain `/documents` would intercept the page navigation instead of the A
 
 ```
 src/
-├── index.ts                      entry point: loads .env, starts the server on port 3000
+├── index.ts                      entry point: loads .env, checks the database, starts the server
 ├── server.ts                     HTTP server, route table, dispatch to handlers
 ├── routes/
 │   └── documents.ts              one handler per endpoint
-├── document-service.ts           in-memory Map of documents, status transitions
+├── db.ts                         shared pg Pool; the guard on destructive statements
+├── migrate.ts                    applies db/migrations/*.sql (`npm run migrate`)
+├── document-service.ts           document records in PostgreSQL, status transitions
 ├── processor.ts                  background processing of an uploaded document
 ├── extractors/
 │   └── pdf-text-extractor.ts     pdf2json wrapper, text statistics
@@ -45,6 +47,11 @@ src/
 built with `tsconfig.lambda.json` and deployed to AWS. The API's own processing path is
 `src/processor.ts`.
 
+The schema itself is outside `src/`: `db/migrations/` holds the `.sql` files, `db/initdb/` the
+script that creates the test database when the container's volume is first initialised, and
+`docker-compose.yml` the container that runs both locally. `src/db.ts` holds the connection pool
+every query goes through; `src/migrate.ts` is the runner ([development.md](development.md#database)).
+
 ### Layers
 
 ```
@@ -56,12 +63,13 @@ server.ts               route table: matches method + number of path segments
    ▼
 routes/documents.ts     HTTP concerns only: parse, validate, pick a status code
    │
-   ├──► document-service.ts    in-memory state; knows nothing about HTTP or S3
+   ├──► document-service.ts    document state in PostgreSQL; knows nothing about HTTP or S3
+   │      └──► db.ts           the connection pool
    └──► s3-file-handler.ts     S3 concerns; knows nothing about HTTP
 ```
 
 Handlers translate between HTTP and those two collaborators. Business state lives in
-`DocumentService`; infrastructure is behind `s3-client.ts` and `s3-file-handler.ts`; and
+`DocumentService`; infrastructure is behind `db.ts`, `s3-client.ts` and `s3-file-handler.ts`; and
 `server.ts` knows nothing about documents.
 
 Routes are matched on the HTTP method **and the exact number of path segments**
@@ -74,7 +82,7 @@ Routes are matched on the HTTP method **and the exact number of path segments**
 POST /documents
   → validate content type, size (5 MB), mime type
   → stream the file to S3
-  → create the record with status "pending"
+  → insert the row with status "pending"
   → 201 Created; processing continues in the background
        → "processing"
        → pdf2json extracts the text
@@ -86,8 +94,11 @@ document may already be `processing` by the time the client reads it. The client
 progress with `GET /documents/:id/status` — see
 [api.md](api.md#get-documentsidstatus).
 
-Records are held in memory only. Restarting the server loses them while the S3 objects
-remain; see [Known Limitations](api.md#known-limitations).
+The record is written to PostgreSQL before the response is sent, so it outlives the process: a
+document is still there after a restart, with its status and its processing result. The file
+bytes stay in S3. Deleting a document removes the S3 objects first and the row second, which is
+why a failed S3 call leaves the document visible and retryable — see
+[api.md](api.md#delete-documentsid).
 
 ## Frontend layout
 
@@ -130,8 +141,11 @@ See [testing.md](testing.md).
 | `tsconfig.lambda.json` | TypeScript config for the Lambda handler |
 | `eslint.config.js` | Backend ESLint (flat config) |
 | `.prettierrc` | Formatting: single quotes, 100 columns, 2 spaces |
-| `vitest.config.ts` | Test environment variables, `tests/setup.ts` |
-| `.env` | AWS region and bucket (git-ignored; template in `.env.example`) |
+| `vitest.config.ts` | Test environment variables, `tests/setup.ts`, `tests/global-setup.ts` |
+| `docker-compose.yml` | Local PostgreSQL, for development and for the test suite |
+| `db/migrations/` | The schema, applied by `npm run migrate` |
+| `db/initdb/` | Creates `document_ai_test` when the container's volume is first initialised |
+| `.env` | `DATABASE_URL`, AWS region and bucket (git-ignored; template in `.env.example`) |
 | `frontend/vite.config.ts` | Dev server and the `/api` proxy |
 | `frontend/tsconfig.json` | Frontend TypeScript: Vue, bundler resolution |
 | `frontend/eslint.config.js` | Frontend ESLint (Vue + Cypress globals) |

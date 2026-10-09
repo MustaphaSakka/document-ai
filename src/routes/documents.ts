@@ -108,13 +108,16 @@ function toDocumentResponse(document: Document): DocumentResponse {
  * Look up a document by ID, sending the matching error response when the ID is
  * missing or unknown. Returns null when a response has already been sent.
  */
-function findDocument(id: string | undefined, response: ServerResponse): Document | null {
+async function findDocument(
+  id: string | undefined,
+  response: ServerResponse,
+): Promise<Document | null> {
   if (!id) {
     sendError(response, 400, 'Bad Request', 'Document ID is required');
     return null;
   }
 
-  const document = documentService.getDocument(id);
+  const document = await documentService.getDocument(id);
   if (!document) {
     sendError(response, 404, 'Not Found', `Document ${id} not found`);
     return null;
@@ -220,10 +223,22 @@ export function createDocument(request: IncomingMessage, response: ServerRespons
         return;
       }
 
-      sendResponse();
+      // Writing the record is a database round trip now, so sendResponse returns
+      // a promise. The busboy callbacks calling this are synchronous, hence the
+      // explicit catch: the try/catch around the handler body cannot see a
+      // rejection raised after it has already returned.
+      sendResponse().catch((error: unknown) => {
+        console.error('Error creating document:', error);
+        sendError(
+          response,
+          500,
+          'Internal Server Error',
+          'An error occurred while creating the document',
+        );
+      });
     }
 
-    function sendResponse(): void {
+    async function sendResponse(): Promise<void> {
       // Prevent duplicate responses
       if (responseSent) {
         return;
@@ -247,7 +262,7 @@ export function createDocument(request: IncomingMessage, response: ServerRespons
       }
 
       // Create document record
-      const document = documentService.createDocument({
+      const document = await documentService.createDocument({
         name: fileResult.filename,
         s3Bucket: fileResult.s3Bucket,
         s3Key: fileResult.s3Key,
@@ -324,11 +339,12 @@ export function createDocument(request: IncomingMessage, response: ServerRespons
 /**
  * GET /documents - list all documents, most recent first
  */
-export function listDocuments(_request: IncomingMessage, response: ServerResponse): void {
-  const documents = documentService
-    .getAllDocuments()
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .map(toDocumentResponse);
+export async function listDocuments(
+  _request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  // Already ordered by the query: created_at DESC, id DESC.
+  const documents = (await documentService.getAllDocuments()).map(toDocumentResponse);
 
   sendJson(response, 200, { documents, total: documents.length });
 }
@@ -336,12 +352,12 @@ export function listDocuments(_request: IncomingMessage, response: ServerRespons
 /**
  * GET /documents/:id
  */
-export function getDocument(
+export async function getDocument(
   _request: IncomingMessage,
   response: ServerResponse,
   params: Record<string, string>,
-): void {
-  const document = findDocument(params['id'], response);
+): Promise<void> {
+  const document = await findDocument(params['id'], response);
   if (!document) {
     return;
   }
@@ -352,12 +368,12 @@ export function getDocument(
 /**
  * GET /documents/:id/status
  */
-export function getDocumentStatus(
+export async function getDocumentStatus(
   _request: IncomingMessage,
   response: ServerResponse,
   params: Record<string, string>,
-): void {
-  const document = findDocument(params['id'], response);
+): Promise<void> {
+  const document = await findDocument(params['id'], response);
   if (!document) {
     return;
   }
@@ -374,12 +390,12 @@ export function getDocumentStatus(
 /**
  * GET /documents/:id/text
  */
-export function getDocumentText(
+export async function getDocumentText(
   _request: IncomingMessage,
   response: ServerResponse,
   params: Record<string, string>,
-): void {
-  const document = findDocument(params['id'], response);
+): Promise<void> {
+  const document = await findDocument(params['id'], response);
   if (!document) {
     return;
   }
@@ -412,22 +428,22 @@ export function getDocumentText(
 
 /**
  * DELETE /documents/:id
- * Removes the S3 objects first, then the in-memory record: if S3 fails the
- * document stays visible and the request can be retried.
+ * Removes the S3 objects first, then the record: if S3 fails the document stays
+ * visible and the request can be retried.
  */
 export async function deleteDocument(
   _request: IncomingMessage,
   response: ServerResponse,
   params: Record<string, string>,
 ): Promise<void> {
-  const document = findDocument(params['id'], response);
+  const document = await findDocument(params['id'], response);
   if (!document) {
     return;
   }
 
   try {
     const { s3Bucket } = document;
-    const keys = [document.s3Key, documentService.getExtractedTextKey(document.id)].filter(
+    const keys = [document.s3Key, documentService.getExtractedTextKey(document.s3Key)].filter(
       (key): key is string => typeof key === 'string',
     );
 
@@ -437,7 +453,7 @@ export async function deleteDocument(
       );
     }
 
-    documentService.deleteDocument(document.id);
+    await documentService.deleteDocument(document.id);
 
     response.statusCode = 204;
     response.end();

@@ -10,6 +10,7 @@ Setup, commands, configuration and conventions for working on this project.
 
 - Node.js 18 or later (developed on Node 24)
 - npm
+- Docker, for the local PostgreSQL container — or any reachable PostgreSQL
 - An S3 bucket, for document uploads
 
 ## Installation
@@ -31,13 +32,41 @@ cp .env.example .env
 
 | Variable | Required | Purpose |
 |---|---|---|
+| `DATABASE_URL` | yes | PostgreSQL the API and `npm run migrate` connect to |
 | `AWS_REGION` | yes | Region of the S3 client |
 | `AWS_S3_BUCKET_NAME` | yes | Bucket the documents are stored in |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | for uploads | Loaded automatically by the SDK; an IAM role works too |
 
-`.env` is git-ignored and must never be committed. `src/s3-client.ts` throws at import time
-when `AWS_REGION` or `AWS_S3_BUCKET_NAME` is missing, so the server will not start without
-them — that failure is deliberate, and it happens before the port is opened.
+`.env` is git-ignored and must never be committed. `src/db.ts` throws at import time when
+`DATABASE_URL` is missing or is not a valid connection URL, and `src/s3-client.ts` does the same
+for `AWS_REGION` and `AWS_S3_BUCKET_NAME`. Both failures are deliberate. `src/index.ts` goes one
+step further: it opens a connection and runs `SELECT 1` *before* binding the port, so an
+unreachable database is reported at startup rather than by whichever request arrives first.
+
+## Database
+
+PostgreSQL holds the document metadata — name, status, S3 location, processing result — while the
+file bytes stay in S3. The schema lives in `db/migrations/`, applied by `npm run migrate`; the
+container that runs it locally is described in `docker-compose.yml`.
+
+```bash
+npm run db:up      # start PostgreSQL and block until it accepts connections
+npm run migrate    # apply anything in db/migrations not yet applied
+npm run db:down    # stop it; the data stays in the named volume
+```
+
+Two databases are created when the container first initialises its volume: `document_ai` for
+development, and `document_ai_test` for the test suite (from the script in `db/initdb/`). That
+directory is read only when the volume is empty, so a change there means recreating the volume
+with `docker compose down -v`.
+
+Migrations are never applied as a side effect of starting the server: a schema change is a
+deliberate step, not something a restart does for you. Each `.sql` file runs inside its own
+transaction and is recorded in `schema_migrations`, so `npm run migrate` is idempotent.
+
+The suite empties the `documents` table between tests, so `src/db.ts` exports a guard —
+`assertTestDatabase()` — that refuses a destructive statement unless the database name ends in
+`_test`. A mistyped `DATABASE_URL` therefore fails loudly instead of wiping development data.
 
 ## Backend commands
 
@@ -45,6 +74,9 @@ Run from the repository root.
 
 | Command | What it does |
 |---|---|
+| `npm run db:up` | Start the local PostgreSQL container, waiting until it is ready |
+| `npm run db:down` | Stop it; the data stays in the named volume |
+| `npm run migrate` | Apply the pending SQL files in `db/migrations/` |
 | `npm run dev` | Start the API on <http://localhost:3000> (`tsx`, no build step) |
 | `npm run dev:watch` | Same, restarting on file changes |
 | `npm run build` | Type-check, then compile to `dist/` |
@@ -57,7 +89,9 @@ Run from the repository root.
 | `npm run format:check` | Prettier in check mode |
 
 `npm test` never exits — it is watch mode. Use `npx vitest run` for a single pass, which is
-what CI would do.
+what CI would do. The backend suite talks to PostgreSQL, so `npm run db:up` has to have run
+first; it points at `document_ai_test` and applies the migrations itself
+([testing.md](testing.md)).
 
 ## Frontend commands
 
@@ -142,7 +176,7 @@ There is no CI workflow and no pre-commit hook in this repository, so these chec
 manual. Run them before committing:
 
 ```bash
-npm run typecheck && npm run lint && npm run format:check && npx vitest run
+npm run db:up && npm run typecheck && npm run lint && npm run format:check && npx vitest run
 
 cd frontend && npm run typecheck && npm run lint && npm run format:check && npm run test:e2e
 ```
